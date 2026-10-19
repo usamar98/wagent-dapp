@@ -1,0 +1,62 @@
+{
+  "name": "wagent-ai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "tsx scripts/local.ts",
+    "setup:env": "node scripts/setup-env.mjs",
+    "preview:demo": "tsx scripts/local.ts --built",
+    "dev:api": "tsx watch server/index.ts",
+    "dev:web": "vite --host 0.0.0.0",
+    "worker": "tsx server/worker.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "build": "prisma generate && tsc --noEmit && vite build && tsc -p tsconfig.server.json && tsc -p runner/tsconfig.json",
+    "start": "node dist/server/server/index.js",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "runner": "tsx runner/index.ts",
+    "wallet:assign": "tsx scripts/assign-wallet.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.0.0",
+    "@prisma/client": "^7.0.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.3",
+    "ethers": "^6.17.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "lucide-react": "^0.577.0",
+    "pg": "^8.16.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.5",
+    "stripe": "latest",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "latest",
+    "@electric-sql/pglite-socket": "latest",
+    "@playwright/test": "latest",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.10.0",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@types/supertest": "^6.0.3",
+    "@vitejs/plugin-react": "latest",
+    "prisma": "^7.0.0",
+    "supertest": "^7.1.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "latest",
+    "vitest": "latest"
+  }
+}

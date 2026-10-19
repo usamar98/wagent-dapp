@@ -1,0 +1,5 @@
+# Wagent Ai design system
+
+Users compare strategies on a laptop in a quiet evening workspace. The supplied W speech-bubble logo defines a near-black background (#07060b) and violet actions (#8848fd). Light lavender text accents and readable pale body text support contrast.
+
+Restrained violet and near-black palette sampled from IMG_8207.PNG. Tinted neutral panels, purple illustrations and selected states; amber/red remain reserved for caution and errors. Product typography uses Segoe UI/system sans with tabular numeric data. Marketplace descriptions use at least 12px. The original supplied raster is used unchanged in the website logo and embedded in a vector viewport for a tightly framed favicon. A persistent sidebar and compact topbar frame wide content. Marketplace listings use purpose-specific cover diagrams, while dashboards use rows and tables. Borders are subtle, corners 8–14px, spacing follows a 4px scale with varied 20–48px sections. Motion is 180ms ease-out and respects reduced motion. All simulations, data sources, prices, and entitlements carry explicit textual labels. MetaMask wallet sign-in replaces email/password forms.

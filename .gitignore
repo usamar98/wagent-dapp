@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.data/
+server/generated/
+test-results/
+playwright-report/
+artifacts/
+*.log
+runner/state.json
+runner/data/
+runner/agent.json

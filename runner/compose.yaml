@@ -1,0 +1,16 @@
+name: agentbazaar-runner
+services:
+  runner:
+    build:
+      context: ..
+      dockerfile: runner/Dockerfile
+    volumes:
+      - ./agent.json:/config/agent.json:ro
+      - runner-state:/data
+    environment:
+      AGENT_CONFIG_PATH: /config/agent.json
+      RUNNER_STATE_DIR: /data
+      MARKET_DATA_URL: ${MARKET_DATA_URL:-}
+      MARKET_DATA_API_KEY: ${MARKET_DATA_API_KEY:-}
+volumes:
+  runner-state:

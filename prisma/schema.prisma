@@ -1,0 +1,306 @@
+generator client {
+  provider = "prisma-client"
+  output = "../server/generated/prisma"
+  moduleFormat = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id String @id @default(cuid())
+  walletAddress String? @unique
+  name String
+  role String @default("USER")
+  emergencyStop Boolean @default(false)
+  inboxEnabled Boolean @default(true)
+  disabled Boolean @default(false)
+  createdAt DateTime @default(now())
+  profile CreatorProfile?
+  agents Agent[]
+  sessions Session[]
+  orders Order[]
+  entitlements Entitlement[]
+  instances Instance[]
+}
+
+model CreatorProfile {
+  id String @id @default(cuid())
+  userId String @unique
+  user User @relation(fields: [userId], references: [id])
+  bio String @default("Independent strategy creator.")
+  stripeAccountId String? @unique
+  chargesEnabled Boolean @default(false)
+  payoutsEnabled Boolean @default(false)
+}
+
+model Session {
+  id String @id
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+}
+
+model WalletChallenge {
+  id String @id
+  walletAddress String
+  chainId Int
+  domain String
+  message String
+  expiresAt DateTime
+  usedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+
+model Agent {
+  id String @id @default(cuid())
+  creatorId String
+  creator User @relation(fields: [creatorId], references: [id])
+  name String
+  description String
+  category String
+  market String
+  tags String[]
+  cover String @default("orbit")
+  createdAt DateTime @default(now())
+  versions AgentVersion[]
+  listing Listing?
+  orders Order[]
+  entitlements Entitlement[]
+  @@index([creatorId])
+}
+
+model AgentVersion {
+  id String @id @default(cuid())
+  agentId String
+  agent Agent @relation(fields: [agentId], references: [id])
+  number Int
+  config Json
+  status String @default("DRAFT")
+  priceCents Int
+  setupInstructions String
+  reviewNote String?
+  testedAt DateTime?
+  createdAt DateTime @default(now())
+  listing Listing?
+  orders Order[]
+  entitlements Entitlement[]
+  instances Instance[]
+  @@unique([agentId, number])
+}
+
+model Listing {
+  id String @id @default(cuid())
+  agentId String @unique
+  agent Agent @relation(fields: [agentId], references: [id])
+  versionId String @unique
+  version AgentVersion @relation(fields: [versionId], references: [id])
+  publishedAt DateTime @default(now())
+}
+
+model Order {
+  id String @id @default(cuid())
+  buyerId String
+  buyer User @relation(fields: [buyerId], references: [id])
+  agentId String
+  agent Agent @relation(fields: [agentId], references: [id])
+  versionId String
+  version AgentVersion @relation(fields: [versionId], references: [id])
+  creatorId String
+  amountCents Int
+  commissionCents Int
+  creatorCents Int
+  status String @default("PENDING")
+  provider String
+  providerSessionId String? @unique
+  paymentIntentId String? @unique
+  payoutStatus String @default("NOT_PAID")
+  checkoutAttempt Int @default(0)
+  createdAt DateTime @default(now())
+  @@unique([buyerId, agentId])
+  @@index([creatorId, status])
+}
+
+model Entitlement {
+  id String @id @default(cuid())
+  buyerId String
+  buyer User @relation(fields: [buyerId], references: [id])
+  agentId String
+  agent Agent @relation(fields: [agentId], references: [id])
+  versionId String
+  version AgentVersion @relation(fields: [versionId], references: [id])
+  orderId String @unique
+  status String @default("ACTIVE")
+  environment String
+  createdAt DateTime @default(now())
+  @@unique([buyerId, agentId])
+}
+
+model PaymentEvent {
+  id String @id
+  provider String
+  orderId String?
+  type String
+  processedAt DateTime @default(now())
+}
+
+model Payout {
+  id String @id @default(cuid())
+  creatorId String
+  providerPayoutId String @unique
+  status String
+  amountCents Int
+  currency String
+  providerEventAt DateTime
+  updatedAt DateTime @updatedAt
+  @@index([creatorId])
+}
+
+model Review {
+  id String @id @default(cuid())
+  buyerId String
+  agentId String
+  rating Int
+  text String
+  createdAt DateTime @default(now())
+  @@unique([buyerId, agentId])
+}
+
+model Connection {
+  id String @id @default(cuid())
+  userId String
+  provider String
+  label String
+  encryptedCredentials String
+  recipient String?
+  verificationHash String?
+  verificationExpiresAt DateTime?
+  verifiedAt DateTime?
+  consentAt DateTime?
+  optedOutAt DateTime?
+  templateName String?
+  templateStatus String @default("NOT_SUBMITTED")
+  eligibility String @default("UNVERIFIED")
+  createdAt DateTime @default(now())
+  @@unique([userId, provider])
+}
+
+model ConsentRecord {
+  id String @id @default(cuid())
+  userId String
+  connectionId String
+  action String
+  text String
+  createdAt DateTime @default(now())
+}
+
+model Instance {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  versionId String
+  version AgentVersion @relation(fields: [versionId], references: [id])
+  status String @default("STOPPED")
+  cashCents Int @default(1000000)
+  lastSignalAt DateTime?
+  createdAt DateTime @default(now())
+  executions Execution[]
+  signals Signal[]
+  trades PaperTrade[]
+  positions Position[]
+  @@unique([userId, versionId])
+}
+
+model Execution {
+  id String @id @default(cuid())
+  instanceId String
+  instance Instance @relation(fields: [instanceId], references: [id])
+  bucket String
+  status String
+  source String
+  marketTimestamp DateTime
+  error String?
+  createdAt DateTime @default(now())
+  @@unique([instanceId, bucket])
+}
+
+model Signal {
+  id String @id @default(cuid())
+  instanceId String
+  instance Instance @relation(fields: [instanceId], references: [id])
+  executionId String
+  symbol String
+  action String
+  price Float
+  reason String
+  source String
+  marketTimestamp DateTime
+  createdAt DateTime @default(now())
+  @@unique([executionId, symbol])
+}
+
+model PaperTrade {
+  id String @id @default(cuid())
+  instanceId String
+  instance Instance @relation(fields: [instanceId], references: [id])
+  signalId String @unique
+  symbol String
+  side String
+  quantity Float
+  price Float
+  amountCents Int
+  status String @default("PAPER_FILLED")
+  createdAt DateTime @default(now())
+}
+
+model Position {
+  id String @id @default(cuid())
+  instanceId String
+  instance Instance @relation(fields: [instanceId], references: [id])
+  symbol String
+  quantity Float
+  entryPrice Float
+  costCents Int
+  @@unique([instanceId, symbol])
+}
+
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  signalId String?
+  channel String
+  title String
+  body String
+  status String @default("DELIVERED_LOCAL")
+  readAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([signalId, channel])
+  @@index([userId, createdAt])
+}
+
+model Moderation {
+  id String @id @default(cuid())
+  adminId String
+  versionId String
+  action String
+  note String
+  createdAt DateTime @default(now())
+}
+
+model Report {
+  id String @id @default(cuid())
+  userId String
+  agentId String
+  reason String
+  status String @default("OPEN")
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  key String @id
+  value String
+}
