@@ -142,6 +142,28 @@ An agent’s name, description, category, tags and cover are fixed after its fir
 
 Authorized exports include only public agent identity, versioned configuration, license terms and setup/runtime instructions. Provider credentials, creator private data and buyer records are excluded. An already downloaded offline configuration cannot be remotely erased following a refund; website entitlements and managed runtimes are revoked/suspended.
 
+## Vercel deployment
+
+The root `vercel.json` publishes `dist/web`, routes `/api/*` to the existing Express app exported by `api/index.ts`, and serves `index.html` for React Router pages such as `/marketplace` and `/auth`. Keep the Vercel project root at the repository root and the framework preset at **Vite**. The build command is `npm run build`; no local database is started during the build.
+
+Configure these server environment variables in the Vercel project's **Production** environment before deploying:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | Hosted PostgreSQL connection string, with pooling and TLS configured for the database provider |
+| `DIRECT_URL` | Optional direct PostgreSQL connection for migrations; Prisma CLI falls back to `DATABASE_URL` when unset |
+| `CREDENTIAL_ENCRYPTION_KEY` | Persistent, randomly generated 64-character hexadecimal key; keep it secret and retain it across deployments |
+| `APP_URL` | `https://wagent-ai.vercel.app` or the final HTTPS custom domain |
+| `DEMO_MODE` | `false` |
+| `PAYMENT_PROVIDER` | `stripe_test` |
+| `ADMIN_WALLET_ADDRESSES` | Optional public administrator wallet addresses |
+
+Vercel sets `NODE_ENV=production`. Keep all database URLs, encryption keys, and provider secrets server-only; never give them a `VITE_` prefix. Set separate values and the correct `APP_URL` for any Preview environment you use. MetaMask sign-in verifies the configured origin.
+
+Apply committed migrations once against the intended hosted database with `npm run db:migrate` from a trusted environment containing its `DIRECT_URL` or `DATABASE_URL`. For Prisma Postgres, retain the provider-generated `postgres://` connection with `sslmode=require`; use its pooled TCP URL for runtime traffic when provided, and its direct TCP URL for migrations. The `PrismaPg` adapter does not accept an Accelerate `prisma+postgres://` URL. Existing local `.data/` records are not uploaded by deploying the repository. Do not run the demo seed against a production database. Stripe test checkout additionally requires the test credentials and eligibility configuration described above.
+
+The API function handles requests only. The existing `npm run worker` process must run separately on a persistent worker host with the same database and encryption configuration for automatic paper execution. Do not launch `npm run dev` or the five-second worker loop inside a Vercel Function. `/api/health` checks database connectivity; `/api/bootstrap` checks the marketplace's initial data response.
+
 ## Architecture and operational boundaries
 
 - `src/`: responsive React product UI, CSS Modules, marketplace, builder, checkout, library, creator/admin dashboards, connections and inbox.
