@@ -2,6 +2,9 @@ node_modules
 dist
 .data
 .env
+.env.*
+artifacts
+IMG_8207.PNG
 .git
 .vercel
 test-results

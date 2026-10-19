@@ -1,6 +1,6 @@
 # Wagent Ai
 
-A working marketplace for versioned, declarative trading agents. React + Vite + TypeScript, CSS Modules, Express, Prisma 7, PostgreSQL, and a separate execution worker. Agent purchases are **one-time payments** with a default 10% platform commission. The MVP generates signals and paper trades only.
+A personal WhatsApp command workspace and marketplace for versioned, declarative trading agents. Build or license a crypto strategy, pair your own WhatsApp agent, preview an order, and confirm its simulated fill. React + Vite + TypeScript, CSS Modules, Express, Prisma 7, PostgreSQL, and a separate execution worker. Agent purchases are **one-time payments** with a default 10% platform commission. The MVP generates signals and paper trades only.
 
 ## Start locally, no Docker required
 
@@ -128,11 +128,35 @@ Checkout uses `mode=payment`, server-selected USD price, and a destination charg
 
 Provider documentation: [Stripe destination charges](https://docs.stripe.com/connect/marketplace/tasks/accept-payment/destination-charges), [Stripe webhooks](https://docs.stripe.com/webhooks), [Stripe restricted businesses](https://stripe.com/legal/restricted-businesses), [Connect country availability](https://docs.stripe.com/connect/cross-border-payouts).
 
-### WhatsApp policy decision
+### Personal WhatsApp Agent Platform
 
-Reviewed on **19 October 2026** against the official [WhatsApp Business Messaging Policy](https://business.whatsapp.com/policy). Its restrictions include currency-related goods/services, opt-in requirements, opt-out handling, and approved templates for business-initiated messages. **The exact eligibility of crypto/forex/trading-signal and AI-agent notifications has not been established. Outbound delivery remains disabled for every account.** A saved credential, verified recipient, or supplied template name does not establish eligibility.
+The primary connection uses the **personal WhatsApp Agent Platform**, documented in WhatsApp’s developer manual (v1, 25 August 2026). It is separate from the Business Cloud API. In WhatsApp Settings → Agents, create an agent, then copy its API key from Chat info. Save the key in Wagent Ai → Connections and send the generated LINK command in that agent chat. Availability depends on your account and rollout. Agent chats are not end-to-end encrypted.
 
-The adapter rejects real delivery and explains why. The local simulator neither calls Meta nor claims real recipient verification. The official webhook verifies the challenge and HMAC-SHA256 signature and processes opt-outs idempotently. Other inbound text is ignored; WhatsApp cannot perform purchases or execute trades. Template names are stored as `NOT_SUBMITTED`, not falsely marked approved. No environment toggle silently enables outbound delivery.
+- Keys are encrypted with the persistent server encryption key. Creators cannot retrieve them. One key can only belong to one Wagent account.
+- Ownership requires a one-time, ten-minute pairing code and a successful reply to the agent creator. Only the paired creator’s recent text messages become commands.
+- The worker calls the fixed official `https://api.whatsapp.com/agent/v1/updates` endpoint, persists exact 64-bit cursors, and leases each connection so concurrent workers/manual syncs do not poll it together.
+- Incoming message IDs and command fills are idempotent. Reply sends with uncertain delivery are recorded as UNKNOWN and never automatically repeated. Known-not-accepted 429/503 replies use backoff.
+- Use `Buy $100 of BTC`, `Show portfolio`, `Start agent`, `Pause agent`, or `Stop all`. Orders create a two-minute preview and require their own eight-character CONFIRM code. Per-order/daily turnover, agent size/exposure, available cash/holdings, current entitlement, and emergency stop are checked before filling.
+- All fills and prices are simulated. Command orders currently support crypto/USD only. Existing autonomous strategy cycles can also create paper fills; they are distinct from confirmed chat instructions. No crypto transfers, real purchases, or withdrawals are implemented.
+- The website shows worker health and offers **Check messages** for a single manual sync. Deploy the separate worker for automatic replies. Vercel frontend/API hosting alone is insufficient.
+
+Official references: [personal agent developer manual](https://www.whatsapp.com/developer/WhatsApp-Agent-Platform-Developer-Manual.pdf), [third-party agent terms](https://www.whatsapp.com/legal/third-party-agents-terms). These documents do not constitute financial-services authorization. The legacy Business webhook/simulator remains separate and its outbound Business delivery remains disabled.
+
+### Coinbase connection
+
+Set server-only `COINBASE_CLIENT_ID` and `COINBASE_CLIENT_SECRET` from an approved Coinbase partner application. Register `APP_URL/api/brokers/coinbase/callback` as the exact callback URL (production: `https://wagent-ai.vercel.app/api/brokers/coinbase/callback`). New OAuth client creation currently requires approved/whitelisted access. See [Coinbase OAuth quickstart](https://docs.cdp.coinbase.com/coinbase-app/oauth2-integration/quickstart).
+
+The connector requests **wallet:accounts:read only**. Authorization uses PKCE S256, one-use expiring state, and the original wallet session. Tokens are encrypted; refresh tokens rotate once. An uncertain refresh requires reconnection. Disconnect removes saved tokens; users can also revoke the app in Coinbase. No trading/transfer scope or live-order endpoint exists in this release. Without approved credentials the UI explains the unavailable connection and paper trading continues.
+
+### Persistent worker deployment
+
+Use the same production DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY as Vercel. Include NODE_ENV=production, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test, and the HTTPS APP_URL. Build the repository and run `node dist/server/server/worker.js` as a persistent process, or run:
+
+```sh
+docker compose -f compose.worker.yaml up -d --build
+```
+
+The worker-only Compose file reads the ignored `.env.production.local` by default; override WAGENT_ENV_FILE for a different protected environment file. It never seeds or provisions a database. Apply migrations first. Automatic restart is enabled. Verify “Background service online” in Connections. No worker host is provisioned by a Vercel deployment. Real WhatsApp and Coinbase behavior must be verified with owner-supplied credentials; integration tests use protocol fixtures.
 
 ### License and operating costs
 

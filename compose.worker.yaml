@@ -1,0 +1,9 @@
+name: wagent-ai-worker
+services:
+  worker:
+    build: .
+    command: ["node", "dist/server/server/worker.js"]
+    env_file: ${WAGENT_ENV_FILE:-.env.production.local}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 90s

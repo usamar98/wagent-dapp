@@ -304,3 +304,88 @@ model Setting {
   key String @id
   value String
 }
+
+model TradingWorkspace {
+  userId String @id
+  activeInstanceId String?
+  maxOrderCents Int @default(10000)
+  maxDailyCents Int @default(50000)
+  updatedAt DateTime @updatedAt
+}
+
+model PersonalAgentChannel {
+  id String @id @default(cuid())
+  userId String @unique
+  label String
+  encryptedToken String
+  tokenFingerprint String @unique
+  ownerId String?
+  agentId String?
+  pairingHash String?
+  pairingExpiresAt DateTime?
+  enabled Boolean @default(true)
+  offset String @default("0")
+  leaseToken String?
+  leaseUntil DateTime?
+  nextPollAt DateTime @default(now())
+  lastPollAt DateTime?
+  lastMessageAt DateTime?
+  lastError String?
+  consentAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AgentCommand {
+  id String @id @default(cuid())
+  userId String
+  source String
+  externalId String
+  text String
+  reply String
+  status String
+  intentId String?
+  channelId String?
+  recipientId String?
+  deliveryStatus String @default("NOT_REQUIRED")
+  replyMessageId String?
+  createdAt DateTime @default(now())
+  @@unique([userId, source, externalId])
+  @@index([userId, createdAt])
+}
+
+model TradeIntent {
+  id String @id @default(cuid())
+  userId String
+  instanceId String
+  confirmationCode String
+  side String
+  symbol String
+  amountCents Int
+  price Float
+  source String
+  status String @default("PENDING")
+  expiresAt DateTime
+  filledAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, status, createdAt])
+  @@unique([userId, confirmationCode])
+}
+
+model BrokerAuthorization {
+  userId String @id
+  encryptedTokens String
+  scope String
+  expiresAt DateTime
+  refreshLeaseUntil DateTime?
+  connectedAt DateTime @default(now())
+}
+
+model BrokerOAuthState {
+  id String @id
+  userId String
+  sessionId String
+  encryptedVerifier String
+  expiresAt DateTime
+  @@index([expiresAt])
+}
