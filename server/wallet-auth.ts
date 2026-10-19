@@ -1,5 +1,6 @@
 import {Router,type Response} from 'express';
 import {rateLimit} from 'express-rate-limit';
+import {rateLimitKey} from './rate-limit.js';
 import {z} from 'zod';
 import {getAddress,verifyMessage} from 'ethers';
 import {db,transaction} from './db.js';
@@ -7,7 +8,7 @@ import {env} from './env.js';
 import {check,createSession,hash,token} from './security.js';
 
 export const walletAuth=Router();
-const limit=rateLimit({windowMs:15*60000,limit:env.demo?100:30,message:{error:'Too many wallet sign-in attempts. Try again later.'}});
+const limit=rateLimit({windowMs:15*60000,limit:env.demo?100:30,keyGenerator:rateLimitKey,message:{error:'Too many wallet sign-in attempts. Try again later.'}});
 const addressSchema=z.string().regex(/^0x[0-9a-fA-F]{40}$/).transform(v=>v.toLowerCase());
 const cookieOptions={httpOnly:true,sameSite:'strict' as const,secure:env.production,path:'/api/auth/wallet'};
 function clearChallenge(res:Response){res.clearCookie('ab_wallet_challenge',cookieOptions);}

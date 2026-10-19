@@ -164,6 +164,8 @@ Apply committed migrations once against the intended hosted database with `npm r
 
 The API function handles requests only. The existing `npm run worker` process must run separately on a persistent worker host with the same database and encryption configuration for automatic paper execution. Do not launch `npm run dev` or the five-second worker loop inside a Vercel Function. `/api/health` checks database connectivity; `/api/bootstrap` checks the marketplace's initial data response.
 
+API and wallet sign-in rate limits use Vercel's validated client-IP header only when running on Vercel. Standalone servers ignore that header. IPv6 addresses retain subnet-based rate limiting.
+
 ## Architecture and operational boundaries
 
 - `src/`: responsive React product UI, CSS Modules, marketplace, builder, checkout, library, creator/admin dashboards, connections and inbox.
