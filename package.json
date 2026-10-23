@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "tsx scripts/local.ts",
+    "dev:supabase": "node --env-file=.env.supabase.local --import tsx scripts/hosted.ts",
     "setup:env": "node scripts/setup-env.mjs",
     "preview:demo": "tsx scripts/local.ts --built",
     "dev:api": "tsx watch server/index.ts",
@@ -15,6 +16,9 @@
     "worker": "tsx server/worker.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
+    "db:check:supabase": "node --env-file=.env.supabase.local --import tsx scripts/supabase.ts check",
+    "db:migrate:supabase": "node --env-file=.env.supabase.local node_modules/prisma/build/index.js migrate deploy",
+    "db:secure:supabase": "node --env-file=.env.supabase.local --import tsx scripts/supabase.ts secure",
     "db:seed": "tsx prisma/seed.ts",
     "build": "prisma generate && tsc --noEmit && vite build && tsc -p tsconfig.server.json && tsc -p runner/tsconfig.json",
     "start": "node dist/server/server/index.js",

@@ -16,6 +16,23 @@ Open **http://localhost:5173**. The launcher starts a persistent embedded Postgr
 
 For a smaller process footprint after a successful build, use `npm run preview:demo`. It serves the built frontend and API together on port 5173 with the embedded database and a separate compiled worker. Stop the development launcher before starting this preview.
 
+## Supabase PostgreSQL
+
+Supabase can host the existing PostgreSQL schema while Prisma remains the backend database client. The wallet login, agent builder, and trading routes continue to use the Express API. No Supabase frontend API keys or Supabase Auth migration are required.
+
+The selected hosted project is [`wagent-ai`](https://supabase.com/dashboard/project/ogahyykwsezulhblaqvx). Its schema, existing application records, and five Prisma migration-history records were copied from the previous hosted database. All 30 application/history tables have RLS enabled and direct browser-role access revoked. See [Supabase setup](docs/SUPABASE.md) for configuration and verification.
+
+After configuring the ignored `.env.supabase.local` from `supabase.env.example`, use:
+
+```sh
+npm run db:migrate:supabase
+npm run db:secure:supabase
+npm run db:check:supabase
+npm run dev:supabase
+```
+
+The hosted launcher connects to the configured database and does not create an embedded database or seed sample records. `npm run dev` continues to launch the standalone local demo. Enable the hosted paper/WhatsApp worker explicitly with `npm run dev:supabase -- --worker`.
+
 ## MetaMask sign-in
 
 Select **Connect MetaMask** in a browser with the MetaMask extension installed. The server issues a five-minute, single-use Sign-In with Ethereum message bound to the configured domain, wallet address, chain and browser. MetaMask signs the message; the server verifies the signature and issues an HttpOnly session. Wallet sign-in requires no API key or blockchain transaction. There are no email/password registration, login or password-reset routes, and no reset-email provider.
