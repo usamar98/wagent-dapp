@@ -38,7 +38,7 @@ async function grant(tx: Tx, order: {id:string;buyerId:string;agentId:string;ver
 export async function applyPaymentEvent(input: {id:string;orderId:string;provider:string;type:'paid'|'failed'|'refunded'|'disputed'|'dispute_won';amountCents?:number;paymentIntentId?:string}) {
   if(input.provider==='simulator') check(env.demo,403,'Payment simulator is disabled');
   return transaction(async tx=>{
-    await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${input.orderId} FOR UPDATE`;
+    await tx.sql`SELECT id FROM "Order" WHERE id = ${input.orderId} FOR UPDATE`;
     if(await tx.paymentEvent.findUnique({where:{id:input.id}})) return {duplicate:true};
     const order=await tx.order.findUnique({where:{id:input.orderId}}); check(order && order.provider===input.provider,404,'Payment order not found');
     await lockUser(tx,order.buyerId);

@@ -25,4 +25,4 @@ export async function seed(){
   if(!welcome)await db.notification.create({data:{userId:'buyer_demo',channel:'in_app',title:'Your independent workspace starts here.',body:'LOCAL DEMO: Explore the marketplace, buy a demo license through the payment simulator, and run a paper agent. No real money moves and no real trades execute.'}});
   console.log('Demo seed ready: 6 reviewed sample agents; buyer, creator, and admin accounts.');
 }
-if(process.argv[1]?.replaceAll('\\','/').endsWith('prisma/seed.ts')){await seed();await db.$disconnect();}
+if(process.argv[1]?.replaceAll('\\','/').endsWith('scripts/seed.ts')){await seed();await db.close();}

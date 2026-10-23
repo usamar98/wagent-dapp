@@ -23,7 +23,7 @@ export async function runInstance(instanceId: string,now=new Date(),feed=simulat
   try {
     return await transaction(async tx=>{
       await lockUser(tx,found.userId);
-      await tx.$queryRaw`SELECT id FROM "Instance" WHERE id = ${instanceId} FOR UPDATE`;
+      await tx.sql`SELECT id FROM "Instance" WHERE id = ${instanceId} FOR UPDATE`;
       const instance=await tx.instance.findUniqueOrThrow({where:{id:instanceId},include:{positions:true}});
       const user=await tx.user.findUniqueOrThrow({where:{id:instance.userId}});
       check(instance.status==='RUNNING'&&!user.emergencyStop&&!user.disabled,409,'Agent is paused, stopped, or emergency stop is active');

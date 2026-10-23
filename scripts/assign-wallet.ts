@@ -14,4 +14,4 @@ try{
   const linked=await db.user.findUnique({where:{walletAddress}});if(linked&&linked.id!==user.id)throw new Error('Wallet is already assigned to another user');
   await db.user.update({where:{id:user.id},data:{walletAddress}});await db.session.deleteMany({where:{userId:user.id}});
   console.log(`Wallet ${getAddress(walletAddress)} linked to ${user.id}. Sign in with MetaMask to prove ownership.`);
-}finally{await db.$disconnect()}
+}finally{await db.close()}

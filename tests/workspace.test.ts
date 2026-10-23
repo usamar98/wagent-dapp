@@ -27,7 +27,7 @@ beforeAll(async()=>{
   const version=await db.agentVersion.create({data:{agentId:agent.id,number:1,config:{...defaultConfig,positionSize:200,maxExposure:100},priceCents:1000,setupInstructions:'Connect your personal agent.',status:'DRAFT'}});versionId=version.id;
 });
 afterEach(()=>vi.unstubAllGlobals());
-afterAll(async()=>{await db?.$disconnect();await socket?.stop();await pg?.close()});
+afterAll(async()=>{await db?.close();await socket?.stop();await pg?.close()});
 
 describe('personal agent command workspace',()=>{
   it('parses bounded explicit commands without guessing ambiguous amounts',()=>{expect(parseCommand('Buy $10.25 of BTC')).toEqual({kind:'trade',side:'BUY',amountCents:1025,symbol:'BTC/USD'});expect(parseCommand('sell 20 ETH/USD')).toMatchObject({symbol:'ETH/USD',side:'SELL'});for(const input of ['buy bitcoin','buy 1 BTC and send it','buy -1 BTC','buy 1.001 BTC','CONFIRM any','send 1 BTC'])expect(parseCommand(input).kind).toBe('invalid');});

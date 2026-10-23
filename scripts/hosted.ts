@@ -6,12 +6,12 @@ const withWorker = process.argv.includes('--worker');
 const { db } = await import('../server/db.js');
 try {
   // Check both connectivity and the current schema without creating or seeding records.
-  await db.$queryRaw`SELECT 1 FROM "User" LIMIT 0`;
-  await db.$queryRaw`SELECT 1 FROM "PersonalAgentChannel" LIMIT 0`;
+  await db.sql`SELECT 1 FROM "User" LIMIT 0`;
+  await db.sql`SELECT 1 FROM "PersonalAgentChannel" LIMIT 0`;
 } catch {
-  console.error('Hosted database check failed. Verify the Supabase connection, TLS trust, and applied Prisma migrations.');
+  console.error('Hosted database check failed. Verify the Supabase connection, TLS trust, and applied SQL migrations.');
   process.exitCode = 1;
-} finally { await db.$disconnect(); }
+} finally { await db.close(); }
 
 if (!process.exitCode) {
   const children: ChildProcess[] = [];

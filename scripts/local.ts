@@ -18,7 +18,7 @@ const childEnv={...process.env,NODE_ENV:'development',DEMO_MODE:'true',PAYMENT_P
 const children:ChildProcess[]=[];
 function launch(file:string,args:string[]=[]){const child=spawn(process.execPath,file.endsWith('.ts')?['--import','tsx',file,...args]:[file,...args],{env:childEnv,stdio:'inherit',windowsHide:true});children.push(child);return child;}
 console.log('Wagent Ai local demo: applying seed data to embedded PostgreSQL.');
-await new Promise<void>((resolve,reject)=>{launch('prisma/seed.ts').on('exit',code=>code===0?resolve():reject(new Error('Seed failed')));});
+await new Promise<void>((resolve,reject)=>{launch('scripts/seed.ts').on('exit',code=>code===0?resolve():reject(new Error('Seed failed')));});
 launch(built?'dist/server/server/index.js':'server/index.ts');
 launch(built?'dist/server/server/worker.js':'server/worker.ts');
 if(!built)launch('node_modules/vite/bin/vite.js',['--host','127.0.0.1']);

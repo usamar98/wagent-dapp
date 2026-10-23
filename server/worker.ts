@@ -10,4 +10,4 @@ const heartbeatTimer=setInterval(()=>void heartbeat().catch(()=>{}),10000);
 await heartbeat();
 while(running) {try{await Promise.all([tick(),tickPersonalAgents()]);}catch{console.error('Worker cycle failed; will retry.');} await new Promise(r=>setTimeout(r,5000));}
 clearInterval(heartbeatTimer);
-await db.$disconnect();
+await db.close();

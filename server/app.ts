@@ -41,7 +41,7 @@ app.post('/api/webhooks/whatsapp',express.raw({type:'application/json',limit:'25
 app.use(express.json({limit:'64kb'}),cookieParser(),session);
 app.use('/api',csrf);
 const authLimit=rateLimit({windowMs:15*60000,limit:env.demo?100:15,message:{error:'Too many authentication attempts. Try again later.'}});
-app.get('/api/health',async(_req,res)=>{await db.$queryRaw`SELECT 1`;res.json({ok:true,demo:env.demo,execution:'paper_only'});});
+app.get('/api/health',async(_req,res)=>{await db.sql`SELECT 1`;res.json({ok:true,demo:env.demo,execution:'paper_only'});});
 app.get('/api/bootstrap',async(req,res)=>{res.json({user:req.user||null,demo:env.demo,costs,licenseTerms,commissionBps:Number((await db.setting.findUnique({where:{key:'commissionBps'}}))?.value||1000),whatsapp:{enabled:true,platform:'personal_agent',execution:'paper_only',termsUrl:'https://www.whatsapp.com/legal/third-party-agents-terms'},stripeEnabled:env.paymentsEligible&&env.stripeKey.startsWith('sk_test_')});});
 app.use('/api/trading', tradingRouter);
 app.use('/api/whatsapp-agent', personalWhatsAppRouter);
@@ -111,8 +111,8 @@ export function errorHandler(err:any,_req:express.Request,res:express.Response,_
   if(err instanceof AppError) return res.status(err.status).json({error:err.message});
   if(err.type==='entity.too.large') return res.status(413).json({error:'Request exceeds the allowed size'});
   if(err instanceof SyntaxError) return res.status(400).json({error:'Malformed JSON request'});
-  if(err.code==='P2002') return res.status(409).json({error:'This record already exists'});
-  if(err.code==='P2025') return res.status(404).json({error:'Record not found'});
+  if(err.code==='23505') return res.status(409).json({error:'This record already exists'});
+  if(err.code==='NOT_FOUND') return res.status(404).json({error:'Record not found'});
   console.error('Request failed', {type:err?.name,code:err?.code});
   return res.status(500).json({error:'The request could not be completed. Please try again.'});
 }

@@ -1,1 +1,0 @@
-ALTER TABLE "Order" ADD COLUMN "checkoutAttempt" INTEGER NOT NULL DEFAULT 0;

@@ -1,6 +1,6 @@
 # Wagent Ai
 
-A personal WhatsApp command workspace and marketplace for versioned, declarative trading agents. Build or license a crypto strategy, pair your own WhatsApp agent, preview an order, and confirm its simulated fill. React + Vite + TypeScript, CSS Modules, Express, Prisma 7, PostgreSQL, and a separate execution worker. Agent purchases are **one-time payments** with a default 10% platform commission. The MVP generates signals and paper trades only.
+A personal WhatsApp command workspace and marketplace for versioned, declarative trading agents. Build or license a crypto strategy, pair your own WhatsApp agent, preview an order, and confirm its simulated fill. React + Vite + TypeScript, CSS Modules, Express, Supabase PostgreSQL with the `pg` driver, and a separate execution worker. Agent purchases are **one-time payments** with a default 10% platform commission. The MVP generates signals and paper trades only.
 
 ## Start locally, no Docker required
 
@@ -8,19 +8,21 @@ Node.js 22.12+ (Node 24 recommended). From this project directory:
 
 ```sh
 npm ci
-npm run db:generate
+npm run setup:env
+# Fill .env.supabase.local with the intended Supabase connection and encryption key.
+npm run db:migrate:supabase
 npm run dev
 ```
 
-Open **http://localhost:5173**. The launcher starts a persistent embedded PostgreSQL database using PGlite on loopback port 5433, applies the SQL migrations, seeds six sample listings, and launches the API (4000), Vite (5173), and a **separate worker process**. The database and a locally generated encryption key are stored in ignored `.data/`. Ctrl+C stops the services. PGlite is the local demo/testing path; Docker uses standard PostgreSQL.
+Open **http://localhost:5173**. The default launcher connects directly to Supabase and starts the API (4000), Vite (5173), and a separate worker. It does not create a database or seed sample records. Ctrl+C stops these services. Existing encryption keys must be retained when connecting to an existing database.
 
-For a smaller process footprint after a successful build, use `npm run preview:demo`. It serves the built frontend and API together on port 5173 with the embedded database and a separate compiled worker. Stop the development launcher before starting this preview.
+An isolated offline fixture remains available with `npm run dev:demo`. It uses embedded PGlite and sample records for demonstration and tests, separate from Supabase. `npm run preview:demo` serves that fixture's built frontend after a successful build. Stop the hosted launcher before using the same ports for a fixture.
 
 ## Supabase PostgreSQL
 
-Supabase can host the existing PostgreSQL schema while Prisma remains the backend database client. The wallet login, agent builder, and trading routes continue to use the Express API. No Supabase frontend API keys or Supabase Auth migration are required.
+Supabase is the hosted database. The backend queries its PostgreSQL endpoint using `pg`, parameterized SQL, and an application-specific typed repository. There is no external ORM or generated database client. The wallet login, agent builder, and trading routes continue to use the Express API.
 
-The selected hosted project is [`wagent-ai`](https://supabase.com/dashboard/project/ogahyykwsezulhblaqvx). Its schema, existing application records, and five Prisma migration-history records were copied from the previous hosted database. All 30 application/history tables have RLS enabled and direct browser-role access revoked. See [Supabase setup](docs/SUPABASE.md) for configuration and verification.
+The selected hosted project is [`wagent-ai`](https://supabase.com/dashboard/project/ogahyykwsezulhblaqvx). Existing application records are preserved. The 29 application tables have RLS enabled and direct browser-role access revoked. SQL migration history uses the standard `supabase_migrations` schema; historical migration metadata is archived privately. See [Supabase setup](docs/SUPABASE.md) for configuration and verification.
 
 After configuring the ignored `.env.supabase.local` from `supabase.env.example`, use:
 
@@ -31,7 +33,7 @@ npm run db:check:supabase
 npm run dev:supabase
 ```
 
-The hosted launcher connects to the configured database and does not create an embedded database or seed sample records. `npm run dev` continues to launch the standalone local demo. Enable the hosted paper/WhatsApp worker explicitly with `npm run dev:supabase -- --worker`.
+`npm run dev` starts the website, API, and worker against Supabase. `npm run dev:supabase` starts only the API and website; add `-- --worker` when needed. Both use the ignored `.env.supabase.local`. One `DATABASE_URL` is used for runtime traffic, schema migration, and security checks.
 
 ## MetaMask sign-in
 
@@ -51,7 +53,7 @@ Multiple administrator addresses can be separated by commas. Never put a seed ph
 
 ### Existing demo profiles and migration
 
-Migration `202610190004_wallet_login` removes password/email fields and old sessions, while preserving users, agents, orders and entitlements. Existing profiles start with an unlinked wallet. The demo seed creates sample creator profiles and six listings, but no reusable login credentials.
+Existing accounts, agents, orders, entitlements, and linked wallets survive the SQL-client migration. The optional demo seed creates sample creator profiles and six listings, but no reusable login credentials.
 
 To preserve an existing account’s resources, link its wallet **before its first wallet sign-in**, using the trusted server CLI while the database is running:
 
@@ -59,7 +61,7 @@ To preserve an existing account’s resources, link its wallet **before its firs
 npm run wallet:assign -- --user-id=buyer_demo --address=0xYOUR_PUBLIC_WALLET_ADDRESS
 ```
 
-Use `creator_demo` or another known user ID as needed. The CLI will not overwrite an existing wallet link or transfer a wallet from a different account. Sign-in still requires the linked wallet’s valid signature. Without linking, MetaMask creates a new account. For a hosted database, run `npm run db:migrate` to apply the new migration; the local launcher applies it automatically.
+Use `creator_demo` or another known user ID as needed. The CLI will not overwrite an existing wallet link or transfer a wallet from a different account. Sign-in still requires the linked wallet’s valid signature. Without linking, MetaMask creates a new account. For a hosted database, provide its environment explicitly when running this trusted CLI.
 
 The supplied `IMG_8207.PNG` is used as the website logo and embedded in a vector viewport for the favicon. The palette is sampled from its purple `#8848fd` and near-black `#07060b`, with readable light text.
 
@@ -70,18 +72,17 @@ npm run setup:env
 docker compose up --build
 ```
 
-The setup script creates `.env` with a random 256-bit encryption key and never overwrites an existing file. Compose starts PostgreSQL 17, a migration/seed job, Express, Vite, and the worker. Open **http://localhost:5173**. PostgreSQL data persists in a named volume. Local database credentials in Compose are for this local demo. Docker was not available in the implementation environment; the Compose build/start was not executed there.
+The setup script creates `.env.supabase.local` and never overwrites an existing file. Fill its database connection before use, and preserve the encryption key when adopting existing records. Compose connects the API and worker to Supabase and runs Vite on **http://localhost:5173**. It does not provision another database or automatically seed/migrate hosted data. Apply SQL migrations explicitly before starting a fresh environment. Docker was not available in the implementation environment; the Compose build/start was not executed there.
 
-For an installed PostgreSQL database, configure `.env` from `.env.example`, then run:
+For the hosted database, configure `.env.supabase.local`, then run:
 
 ```sh
 npm ci
-npm run db:generate
-npm run db:migrate
-npm run db:seed
+npm run db:migrate:supabase
+npm run db:check:supabase
 ```
 
-Run `npm run dev:api`, `npm run dev:web`, and `npm run worker` in separate terminals. `db:seed` requires `DEMO_MODE=true` and a non-production `NODE_ENV`.
+`npm run dev` starts all local services. Standalone API and worker commands need their environment supplied explicitly. `db:seed` is only for isolated fixtures and requires `DEMO_MODE=true` and a non-production `NODE_ENV`.
 
 ## Complete demo walkthrough
 
@@ -103,7 +104,7 @@ npm test
 npm run build
 ```
 
-Tests use an isolated in-memory PostgreSQL engine exposed over the PostgreSQL wire protocol, with the same Prisma client and SQL migrations as the application. They cover strategy calculations, risk limits, invalid/stale data, purchase authorization, server pricing, signed webhook validation, retries, data isolation, immutable purchase versions, paper-order deduplication, emergency stop, reversals, wallet signature verification, nonce replay prevention, challenge expiry, domain/browser binding and disabled-wallet rejection.
+Tests use an isolated in-memory PostgreSQL engine exposed over the PostgreSQL wire protocol, with the same `pg` repository and Supabase SQL migrations as the application. They cover strategy calculations, risk limits, invalid/stale data, purchase authorization, server pricing, signed webhook validation, retries, data isolation, immutable purchase versions, paper-order deduplication, emergency stop, reversals, wallet signature verification, nonce replay prevention, challenge expiry, domain/browser binding and disabled-wallet rejection. Database regression tests also check SQL injection protection, timestamp handling, nested-write rollback, relation projections, and preservation of existing records.
 
 With the local demo running and Microsoft Edge installed on Windows (Google Chrome on other platforms):
 
@@ -192,7 +193,6 @@ Configure these server environment variables in the Vercel project's **Productio
 | Variable | Value |
 | --- | --- |
 | `DATABASE_URL` | Hosted PostgreSQL connection string, with pooling and TLS configured for the database provider |
-| `DIRECT_URL` | Optional direct PostgreSQL connection for migrations; Prisma CLI falls back to `DATABASE_URL` when unset |
 | `CREDENTIAL_ENCRYPTION_KEY` | Persistent, randomly generated 64-character hexadecimal key; keep it secret and retain it across deployments |
 | `APP_URL` | `https://wagent-ai.vercel.app` or the final HTTPS custom domain |
 | `DEMO_MODE` | `false` |
@@ -201,7 +201,7 @@ Configure these server environment variables in the Vercel project's **Productio
 
 Vercel sets `NODE_ENV=production`. Keep all database URLs, encryption keys, and provider secrets server-only; never give them a `VITE_` prefix. Set separate values and the correct `APP_URL` for any Preview environment you use. MetaMask sign-in verifies the configured origin.
 
-Apply committed migrations once against the intended hosted database with `npm run db:migrate` from a trusted environment containing its `DIRECT_URL` or `DATABASE_URL`. For Prisma Postgres, retain the provider-generated `postgres://` connection with `sslmode=require`; use its pooled TCP URL for runtime traffic when provided, and its direct TCP URL for migrations. The `PrismaPg` adapter does not accept an Accelerate `prisma+postgres://` URL. Existing local `.data/` records are not uploaded by deploying the repository. Do not run the demo seed against a production database. Stripe test checkout additionally requires the test credentials and eligibility configuration described above.
+Apply committed SQL migrations with `npm run db:migrate:supabase`, or `npm run db:migrate` in a trusted environment containing `DATABASE_URL`. Runtime and migration traffic can both use the Supabase transaction pooler on port 6543; the runner holds a transaction lock and records versions in `supabase_migrations.schema_migrations`. Use verified TLS and the bundled Supabase CA. Existing local fixture records are not uploaded by deploying the repository. Do not run the demo seed against a hosted production database. Stripe test checkout additionally requires the test credentials and eligibility configuration described above.
 
 The API function handles requests only. The existing `npm run worker` process must run separately on a persistent worker host with the same database and encryption configuration for automatic paper execution. Do not launch `npm run dev` or the five-second worker loop inside a Vercel Function. `/api/health` checks database connectivity; `/api/bootstrap` checks the marketplace's initial data response.
 
@@ -212,7 +212,9 @@ API and wallet sign-in rate limits use Vercel's validated client-IP header only 
 - `src/`: responsive React product UI, CSS Modules, marketplace, builder, checkout, library, creator/admin dashboards, connections and inbox.
 - `server/`: Express API, authorization, encrypted connections, provider adapters, payment transitions, deterministic execution, and separate worker.
 - `shared/`: strict Zod declarative schemas and pure deterministic strategy/risk calculations shared by server and runner.
-- `prisma/`: normalized marketplace/operations schema, committed PostgreSQL migrations and idempotent demo seed.
+- `supabase/migrations/`: committed PostgreSQL schema and security migrations.
+- `server/database/`: typed application records, whitelisted query construction, and pooled PostgreSQL access.
+- `scripts/`: SQL migration/check commands and the optional isolated demo seed.
 - `runner/`: Docker-based self-hosted paper runtime and persisted local control/ledger files.
 - `tests/`, `e2e/`: service/strategy security tests and browser workflow tests.
 
