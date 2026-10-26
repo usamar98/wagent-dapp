@@ -5,7 +5,7 @@ import { tickPersonalAgents } from './personal-whatsapp.js';
 import { tickSolanaAlerts } from './solana-alerts.js';
 let running=true;
 for(const sig of ['SIGINT','SIGTERM'] as const) process.on(sig,()=>{running=false;});
-console.log('Wagent Ai worker started. Personal WhatsApp replies and Solana alert checks. Swaps require website wallet approval.');
+console.log('Wagent Ai worker started. Personal WhatsApp replies, permissioned chat trading, and Solana alert checks.');
 async function heartbeat(){await db.setting.upsert({where:{key:'workerHeartbeat'},create:{key:'workerHeartbeat',value:String(Date.now())},update:{value:String(Date.now())}});}
 const heartbeatTimer=setInterval(()=>void heartbeat().catch(()=>{}),10000);
 await heartbeat();

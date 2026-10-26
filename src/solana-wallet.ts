@@ -11,6 +11,13 @@ export function observeWallets(update: () => void) {
   return () => { a(); b(); };
 }
 function toBase64(bytes: Uint8Array) { return btoa(String.fromCharCode(...bytes)); }
+export async function signWalletMessage(wallet: SolanaWallet, address: string, message: string) {
+  const connection = await wallet.features['standard:connect'].connect();
+  const account = (connection.accounts as WalletAccount[]).find(a => a.address === address && a.chains.includes('solana:mainnet'));
+  if (!account) throw new Error('Select the original owner Solana account in your wallet.');
+  const [signed] = await wallet.features['solana:signMessage'].signMessage({ account, message: new TextEncoder().encode(message) });
+  return toBase64(signed.signature);
+}
 export async function linkWallet(wallet: SolanaWallet) {
   const result = await wallet.features['standard:connect'].connect();
   const account = (result.accounts as WalletAccount[]).find(a => a.chains.includes('solana:mainnet'));

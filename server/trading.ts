@@ -11,9 +11,11 @@ import { env } from './env.js';
 import { isSolanaAddress } from '../shared/solana.js';
 import { providerStatus } from './solana-providers.js';
 import { channelWebsiteRuntime, websiteOrigin, type WebsiteRuntime } from './website-runtime.js';
+import { queueChatTrade, dispatchChatCommand } from './solana-chat-trading.js';
+import { revokeTrading, validateTradePermission } from './solana-permissions.js';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-const help = 'WAGENT AI · SOLANA · Try Status; Stop all; Buy 0.1 SOL of <mint>; Sell 100 of <mint>. Buy/sell opens a website review. You must sign each swap in your Solana wallet. Create price, liquidity, or token discovery alert rules on the website. Earlier paper balances are simulations.';
+const help = 'WAGENT AI · SOLANA · Try Status; Check trade; Revoke trading; Stop all; Buy 0.1 SOL of <mint>; Sell 100 of <mint>. With active signed permission, WhatsApp orders trade from your funded dedicated wallet within your approved limits. Otherwise buy/sell opens a website review with your Solana wallet signature. Configure permission, token alerts, and withdrawals on the website. Earlier paper balances are simulations.';
 
 export async function getWorkspace(userId: string) {
   return transaction(async tx => {
@@ -54,7 +56,7 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
     check(channel?.leaseUntil&&channel.leaseUntil>new Date(),403,'This WhatsApp connection was disconnected or changed.');
     website=await channelWebsiteRuntime(channel.appUrl);
   }
-  return transaction(async tx => {
+  const outcome = await transaction(async tx => {
     await lockUser(tx, userId);
     const user = await tx.user.findUnique({ where: { id: userId } });
     check(user && !user.disabled, 403, 'This account is unavailable.');
@@ -68,21 +70,33 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
     if (existing) return { command: existing, duplicate: true };
     let reply = '', status = 'COMPLETED', intentId: string | undefined;
     try {
+      if(!env.demo&&source==='WHATSAPP'&&/^check (my )?trade$/i.test(text.trim())){
+        const command=await tx.agentCommand.create({data:{userId,source,externalId,text,reply:'Checking the latest chat trade. No new order is submitted.',status:'CHECK_QUEUED',channelId:channelContext!.id,recipientId:channelContext!.ownerId,deliveryStatus:'PENDING',createdAt:now}});return {command,duplicate:false};
+      }
       const tradeLink=/^(buy|sell)\s+(\d{1,12}(?:\.\d{1,18})?)\s+(SOL\s+of|of)\s+([1-9A-HJ-NP-Za-km-z]{32,44})$/i.exec(text.trim());
       if(!env.demo&&tradeLink){
         check(!user.emergencyStop,409,'Emergency stop is active. Clear it on the website first.');
+        if(source==='WHATSAPP'){
+          const queued=await queueChatTrade(tx,userId,text,externalId,channelContext!,now,website.appUrl);
+          if(queued)return {command:queued,duplicate:false};
+        }
         const side=tradeLink[1].toUpperCase(),amount=tradeLink[2],mint=tradeLink[4];
         check(isSolanaAddress(mint)&&Number(amount)>0,400,'Use a valid mint and positive amount.');
         check(side==='BUY'?tradeLink[3].toLowerCase()==='sol of':tradeLink[3].toLowerCase()==='of',400,'Use Buy <SOL amount> SOL of <mint>, or Sell <token amount> of <mint>.');
         const link=new URL('/trade',website.appUrl);link.search=new URLSearchParams({side,mint,amount}).toString();
-        reply=`SOLANA SWAP REVIEW · ${side==='BUY'?`Spend ${amount} SOL`:`Sell ${amount} tokens`}\nMint: ${mint}\n${link}\nSign in, review a fresh Jupiter quote, and approve it in your linked Solana wallet. This message does not submit an order.${website.swapsEnabled===false?' Jupiter trading setup is still required.':website.swapsEnabled===null?' Website trading status could not be checked; open the link to verify.':''}`;
+        reply=`SOLANA SWAP REVIEW · ${side==='BUY'?`Spend ${amount} SOL`:`Sell ${amount} tokens`}\nMint: ${mint}\n${link}\nSign in, review a fresh Jupiter quote, and approve it in your linked Solana wallet. This message does not submit an order. For WhatsApp-only trading, fund and authorize a dedicated wallet on the WhatsApp trading page.${website.swapsEnabled===false?' Jupiter trading setup is still required.':website.swapsEnabled===null?' Website trading status could not be checked; open the link to verify.':''}`;
         const saved=await tx.agentCommand.create({data:{userId,source,externalId,text,reply,status:'COMPLETED',channelId:channelContext?.id,recipientId:channelContext?.ownerId,deliveryStatus:source==='WHATSAPP'?'PENDING':'NOT_REQUIRED',createdAt:now}});return {command:saved,duplicate:false};
       }
       const command = parseCommand(text);
       if (command.kind === 'invalid') throw new AppError(400, command.reason);
       if (!env.demo && (command.kind === 'trade' || command.kind === 'confirm' || command.kind === 'start')) throw new AppError(409, 'Use Buy <amount> SOL of <mint> or Sell <amount> of <mint> for a website review link. Each real swap needs a Solana wallet signature on the website. Configure automatic alerts in Token alerts.');
       if (command.kind === 'help') reply = `${help}\nManage your alerts: ${new URL('/alerts',website.appUrl)}`;
+      else if(command.kind==='revoke'){
+        await revokeTrading(tx,userId,'Trading permission revoked from the paired WhatsApp chat.');
+        reply='TRADING REVOKED · New chat trades are blocked. Funds remain in your dedicated wallet. Withdraw them to the original owner wallet on the WhatsApp trading page. Already-submitted transactions cannot be recalled.';
+      }
       else if (command.kind === 'emergency') {
+        await revokeTrading(tx,userId,'Emergency stop revoked chat trading permission.');
         await tx.user.update({ where: { id: userId }, data: { emergencyStop: true } });
         await tx.instance.updateMany({ where: { userId }, data: { status: 'STOPPED' } });
         await tx.tradeIntent.updateMany({ where: { userId, status: 'PENDING' }, data: { status: 'CANCELLED' } });
@@ -93,13 +107,16 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
         const wallet=await tx.solanaWallet.findUnique({where:{userId}});
         if(command.kind==='status'){
           const enabled=await tx.solanaAlertRule.count({where:{userId,enabled:true}});
-          reply=`WAGENT AI · SOLANA\nTrading: ${website.swapsEnabled===true?'Jupiter ready, wallet approval required':website.swapsEnabled===false?'Jupiter setup required':'Website status temporarily unavailable'}\nSolana wallet: ${wallet?.address||'not linked'}\nActive alert rules: ${enabled}\nEmergency stop: ${user.emergencyStop?'active':'off'}\nManage alerts: ${new URL('/alerts',website.appUrl)}\nEach real swap requires a website review and wallet signature.`;
+          const grant=await tx.solanaTradePermission.findFirst({where:{userId,revokedAt:null,expiresAt:{gt:new Date()}}});let permission:typeof grant=null;
+          if(grant)try{permission=(await validateTradePermission(tx,userId,grant.id,website.appUrl)).permission;}catch{/* Invalidated permissions are shown inactive. */}
+          reply=`WAGENT AI · SOLANA\nTrading: ${website.swapsEnabled===true?'Jupiter ready':website.swapsEnabled===false?'Jupiter setup required':'Website status temporarily unavailable'}\nSolana owner wallet: ${wallet?.address||'not linked'}\nChat trading: ${permission?'authorized until '+permission.expiresAt.toISOString():'inactive; website wallet approval required'}${permission?`\nDedicated wallet: ${permission.tradingAddress}\nPer-trade budget: ${Number(permission.perTradeLamports)/1e9} SOL\nDaily budget (UTC): ${Number(permission.dailyLamports)/1e9} SOL`:''}\nActive alert rules: ${enabled}\nEmergency stop: ${user.emergencyStop?'active':'off'}\nManage alerts: ${new URL('/alerts',website.appUrl)}\n${permission?'Send Revoke trading to block new chat trades.':'Each real swap requires a website review and wallet signature until you authorize chat trading.'}`;
         }else if(command.kind==='portfolio')reply=`SOLANA WALLET · ${wallet?.address||'Link a Solana wallet in Buy & sell first.'}\nOpen your wallet to view current holdings. Wagent Ai does not substitute paper balances for on-chain funds.\n${new URL('/trade',website.appUrl)}`;
         else{
+          await revokeTrading(tx,userId,'Workspace pause revoked chat trading permission.');
           await tx.solanaAlertRule.updateMany({where:{userId,enabled:true},data:{enabled:false}});
           await tx.agentCommand.updateMany({where:{userId,source:'ALERT',deliveryStatus:{in:['PENDING','RETRY']}},data:{deliveryStatus:'CANCELLED'}});
           await tx.solanaSwap.updateMany({where:{userId,status:'QUOTED'},data:{status:'CANCELLED'}});
-          reply=`WORKSPACE PAUSED · Alert rules paused and unsigned swap quotes cancelled. Enable individual rules on the website to resume. Already-submitted transactions cannot be recalled.\n${new URL('/alerts',website.appUrl)}`;
+          reply=`WORKSPACE PAUSED · Chat trading permission revoked, alert rules paused, and unsigned swap quotes cancelled. Sign a new trading permission on the website to resume chat trades. Already-submitted transactions cannot be recalled.\n${new URL('/alerts',website.appUrl)}`;
         }
       } else {
         const { workspace, instance, config } = await activeRuntime(tx, userId);
@@ -167,6 +184,8 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
     const command = await tx.agentCommand.create({ data: { userId, source, externalId, text, reply, status, intentId, channelId: channelContext?.id, recipientId: channelContext?.ownerId, deliveryStatus: source === 'WHATSAPP' ? 'PENDING' : 'NOT_REQUIRED', createdAt: now } });
     return { command, duplicate: false };
   });
+  if(source==='WHATSAPP'&&channelContext&&['TRADE_QUEUED','CHECK_QUEUED'].includes(outcome.command.status))return {...outcome,command:await dispatchChatCommand(outcome.command,channelContext,website.appUrl)};
+  return outcome;
 }
 
 export const tradingRouter = Router();
@@ -182,7 +201,7 @@ tradingRouter.post('/settings', async (req, res) => {
       await canUseVersion(tx, userId, input.versionId);
       const instance = await tx.instance.upsert({ where: { userId_versionId: { userId, versionId: input.versionId } }, create: { userId, versionId: input.versionId }, update: {} });
       activeInstanceId = instance.id;
-      if (activeInstanceId !== workspace.activeInstanceId) await tx.tradeIntent.updateMany({ where: { userId, status: 'PENDING' }, data: { status: 'CANCELLED' } });
+      if (activeInstanceId !== workspace.activeInstanceId) {await tx.tradeIntent.updateMany({ where: { userId, status: 'PENDING' }, data: { status: 'CANCELLED' } });await revokeTrading(tx,userId,'Changing the selected agent revoked chat trading permission.');}
     }
     const maxOrderCents = input.maxOrderCents ?? workspace.maxOrderCents, maxDailyCents = input.maxDailyCents ?? workspace.maxDailyCents;
     check(maxDailyCents >= maxOrderCents, 400, 'Daily limit must be at least the per-order limit.');

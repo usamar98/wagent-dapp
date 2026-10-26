@@ -28,6 +28,7 @@
     "dev:demo": "tsx scripts/local.ts"
   },
   "dependencies": {
+    "@solana/addresses": "8.5.0",
     "@solana/transaction-messages": "8.5.0",
     "@solana/transactions": "8.5.0",
     "@wallet-standard/app": "1.1.0",

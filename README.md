@@ -12,11 +12,12 @@ A Solana-only agent workspace. Create a private token configuration, pair your p
 - Private account-scoped watchlists stored in Supabase, with up to 30 mints.
 - Activity history, ownership isolation, and emergency stop.
 - Jupiter exact-input SOL/token swaps with one-use Solana wallet ownership proofs, a review screen, and wallet approval for every transaction.
+- Optional WhatsApp-only trading from a separately funded, server-managed wallet: signed advance permission, approved mints, per-trade/daily SOL budgets, fee and slippage caps, expiry, and revoke access. Owner-signed SOL/token withdrawals return funds to the original owner wallet. See [WhatsApp trading](docs/WHATSAPP-TRADING.md).
 - DEX Screener token discovery, price, and liquidity alerts, delivered in app or to the explicitly selected paired WhatsApp chat.
 
 ## Coming soon
 
-Automatic take-profit/stop-loss, volume alerts, and agent marketplace licensing remain upcoming. Each real swap requires a website wallet signature. Personal WhatsApp buy/sell commands return review links rather than submitting orders. Earlier paper records are preserved; paper execution remains in isolated demo/test fixtures only.
+Automatic take-profit/stop-loss, volume alerts, and agent marketplace licensing remain upcoming. Without active advance permission, personal WhatsApp buy/sell commands return wallet-review links. With permission, the paired owner’s explicit commands can submit trades within the signed limits. Earlier paper records are preserved; paper execution remains in isolated demo/test fixtures only.
 
 Coinbase OAuth has been removed. Historical broker database tables and encrypted records are retained for recovery and are not accessed by the active integration. Other markets are not offered or accepted in new configurations. Existing incompatible strategies remain stored and are not runnable.
 
@@ -37,7 +38,7 @@ Open http://localhost:5173. The API uses port 4000. The launcher starts the API,
 
 Core environment: DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY, APP_URL, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test. Only DATABASE_URL is used, with verified TLS and the included public Supabase CA. Add JUPITER_API_KEY and SOLANA_SWAPS_ENABLED=true for swaps. DEX Screener needs no key. Birdeye, Coinbase, and AI keys are not used. Each user supplies their personal WhatsApp agent key in Connections. See [provider setup and exact Vercel variables](docs/SOLANA-PROVIDERS.md).
 
-See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All 35 application tables retain backend-only access. The latest migration preserves old alerts, switches their data source to DEX Screener, and stores token discovery history and each WhatsApp channel’s website origin. Watchlists use a per-user Setting key.
+See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All 40 application tables retain backend-only access. The latest additive migration stores dedicated encrypted wallet keys, signed permissions, one-use challenges, chat-trade reservations, and withdrawals. Existing pairings and data remain intact. Watchlists use a per-user Setting key.
 
 ## Data-source behavior
 

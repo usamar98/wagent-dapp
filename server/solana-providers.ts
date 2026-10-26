@@ -38,8 +38,8 @@ export function atomicAmount(value:string,decimals:number):string {
 }
 export function humanAmount(value:string,decimals:number) {const padded=value.padStart(decimals+1,'0');return decimals?`${padded.slice(0,-decimals)}.${padded.slice(-decimals)}`.replace(/\.?0+$/,''):value;}
 export const orderSchema=z.object({requestId:z.string().min(1).max(200),transaction:z.string().min(1).max(10000),inputMint:addressSchema,outputMint:addressSchema,inAmount:z.string().regex(/^[1-9]\d{0,19}$/),outAmount:z.string().regex(/^[1-9]\d{0,19}$/),otherAmountThreshold:z.string().regex(/^[1-9]\d{0,19}$/),router:z.string().max(80),feeBps:z.number().finite().nonnegative().optional(),feeMint:z.string().optional(),priceImpact:z.number().finite().optional(),priceImpactPct:z.union([z.number(),z.string()]).optional(),slippageBps:z.number().int().min(0).max(500).optional(),expireAt:z.string().optional(),lastValidBlockHeight:z.string().optional(),signatureFeeLamports:z.number().nonnegative().optional(),prioritizationFeeLamports:z.number().nonnegative().optional(),rentFeeLamports:z.number().nonnegative().optional(),signatureFeePayer:z.string().nullable().optional(),taker:z.string().nullable().optional()});
-export async function jupiterOrder(inputMint:string,outputMint:string,amount:string,taker:string,slippageBps:number) {
-  const params=new URLSearchParams({inputMint,outputMint,amount,taker,slippageBps:String(slippageBps),maxSupportedTransactionVersion:'0',excludeRouters:'jupiterz'});
+export async function jupiterOrder(inputMint:string,outputMint:string,amount:string,taker:string,slippageBps:number,chatOnly=false) {
+  const params=new URLSearchParams({inputMint,outputMint,amount,taker,slippageBps:String(slippageBps),maxSupportedTransactionVersion:'0',excludeRouters:chatOnly?'jupiterz,dflow,okx':'jupiterz'});
   const raw=await fetchJson(`https://api.jup.ag/swap/v2/order?${params}`,{headers:jupiterHeaders()},'Jupiter');
   check(!raw.errorCode&&raw.transaction,400,'Jupiter cannot prepare this swap. Check token support, funds, and SOL for fees.');
   const order=orderSchema.safeParse(raw);check(order.success,502,'Jupiter returned an unsupported order response.');
@@ -48,10 +48,10 @@ export async function jupiterOrder(inputMint:string,outputMint:string,amount:str
   check(BigInt(order.data.otherAmountThreshold)<=BigInt(order.data.outAmount)&&BigInt(order.data.otherAmountThreshold)>=BigInt(order.data.outAmount)*BigInt(10000-slippageBps)/10000n,502,'Jupiter returned an output threshold outside your slippage limit.');
   return order.data;
 }
-export async function jupiterExecute(signedTransaction:string,requestId:string,lastValidBlockHeight?:string) {
-  return fetchJson('https://api.jup.ag/swap/v2/execute',{method:'POST',headers:{...jupiterHeaders(),'Content-Type':'application/json'},body:JSON.stringify({signedTransaction,requestId,...(lastValidBlockHeight?{lastValidBlockHeight}:{})})},'Jupiter execution',25000);
+export async function jupiterExecute(signedTransaction:string,requestId:string,lastValidBlockHeight?:string,timeout=25000) {
+  return fetchJson('https://api.jup.ag/swap/v2/execute',{method:'POST',headers:{...jupiterHeaders(),'Content-Type':'application/json'},body:JSON.stringify({signedTransaction,requestId,...(lastValidBlockHeight?{lastValidBlockHeight}:{})})},'Jupiter execution',timeout);
 }
-async function rpc(method:string,params:unknown[]) {
+export async function rpc(method:string,params:unknown[]) {
   const url=process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
   check(new URL(url).protocol==='https:',503,'SOLANA_RPC_URL must use HTTPS.');
   const raw=await fetchJson(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})},'Solana confirmation');

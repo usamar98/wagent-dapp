@@ -6,6 +6,7 @@ import { auth, check, encrypt, decrypt, hash, token, AppError } from './security
 import { executeCommand } from './trading.js';
 import { env } from './env.js';
 import { websiteOrigin } from './website-runtime.js';
+import { revokeTrading } from './solana-permissions.js';
 
 const base = 'https://api.whatsapp.com/agent/v1';
 const senderId = z.string().regex(/^user:[A-Za-z0-9._-]{1,160}$/);
@@ -76,7 +77,7 @@ export async function syncPersonalAgent(userId: string) {
   const channel = await db.personalAgentChannel.findUnique({ where: { userId } });
   check(channel?.enabled, 409, 'Connect and enable your personal WhatsApp agent first.');
   const lease = token(), now = new Date();
-  const claimed = await db.personalAgentChannel.updateMany({ where: { id: channel.id, enabled: true, nextPollAt: { lte: now }, OR: [{ leaseUntil: null }, { leaseUntil: { lte: now } }] }, data: { leaseToken: lease, leaseUntil: new Date(Date.now() + 90000), nextPollAt: new Date(Date.now() + 6000) } });
+  const claimed = await db.personalAgentChannel.updateMany({ where: { id: channel.id, enabled: true, nextPollAt: { lte: now }, OR: [{ leaseUntil: null }, { leaseUntil: { lte: now } }] }, data: { leaseToken: lease, leaseUntil: new Date(Date.now() + 180000), nextPollAt: new Date(Date.now() + 6000) } });
   if (!claimed.count) return { busy: true };
   try {
     const user = await db.user.findUnique({ where: { id: userId }, select: { disabled: true } });
@@ -104,7 +105,7 @@ export async function syncPersonalAgent(userId: string) {
           const pairing = message.text?.body.trim().match(/^link ([A-F0-9]{12})$/i);
           if (!pairing || !fresh.pairingHash || hash(pairing[1].toUpperCase()) !== fresh.pairingHash || !fresh.pairingExpiresAt || fresh.pairingExpiresAt < new Date()) continue;
           // Meta rejects sends to anyone other than this agent's creator.
-          await sendReply(decrypt(fresh.encryptedToken), message.from, 'Wagent Ai connected. Select your Solana agent in Connections. Send Help for swap review commands. Configure token alerts on the website. Each swap requires your Solana wallet signature. Pairing does not authorize access to wallet funds.');
+          await sendReply(decrypt(fresh.encryptedToken), message.from, 'Wagent Ai connected. Select your Solana agent in Connections. Send Help for trading commands. Optional WhatsApp-only trading requires a separately funded trading wallet and a signed spending permission on the website. Pairing alone does not authorize access to wallet funds.');
           await transaction(async tx => {
             await lockUser(tx, userId);
             await tx.personalAgentChannel.updateMany({ where: { id: fresh.id, leaseToken: lease, pairingHash: fresh.pairingHash, enabled: true }, data: { ownerId: message.from, agentId: entry.id, pairingHash: null, pairingExpiresAt: null, lastMessageAt: new Date() } });
@@ -138,6 +139,7 @@ personalWhatsAppRouter.post('/', async (req, res) => {
   await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
     const data = { appUrl:websiteOrigin(env.appUrl),label: input.label, encryptedToken: encrypt(input.apiKey), tokenFingerprint: hash(input.apiKey), ownerId: null, agentId: null, pairingHash: hash(code), pairingExpiresAt: new Date(Date.now() + 10 * 60000), enabled: true, offset: '0', leaseToken: null, leaseUntil: null, nextPollAt: new Date(), lastError: null, lastPollAt: null, lastMessageAt: null, createdAt: new Date(), consentAt: new Date() };
+    await revokeTrading(tx,userId,'Replacing the WhatsApp connection revoked chat trading permission.');
     const previous = await tx.personalAgentChannel.findUnique({ where: { userId } });
     if (previous) await tx.agentCommand.updateMany({ where: { channelId: previous.id, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'CANCELLED' } });
     await tx.personalAgentChannel.upsert({ where: { userId }, create: { userId, ...data }, update: data });
@@ -158,6 +160,7 @@ personalWhatsAppRouter.post('/pairing', async (req, res) => {
 personalWhatsAppRouter.post('/disconnect', async (req, res) => {
   await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
+    await revokeTrading(tx,userId,'Disconnecting WhatsApp revoked chat trading permission.');
     const channel = await tx.personalAgentChannel.findUnique({ where: { userId } });
     if (channel) {
       await tx.agentCommand.updateMany({ where: { channelId: channel.id, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'CANCELLED' } });

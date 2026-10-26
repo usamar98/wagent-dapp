@@ -5,7 +5,7 @@ import { createDatabase, type Database } from '../server/database/client.js';
 import { databaseSchema } from '../server/database/schema.js';
 import { migrateEmbedded } from '../scripts/database.js';
 import { defaultConfig } from '../shared/config.js';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 describe('direct PostgreSQL access', () => {
   let pg: PGlite, socket: PGLiteSocketServer, db: Database;
@@ -92,7 +92,8 @@ describe('existing database adoption', () => {
       expect((await pg.query('SELECT id,name FROM "User"')).rows).toEqual([{id:'existing-owner',name:'Existing owner'}]);
       expect((await pg.query('SELECT id,migration_name FROM wagent_internal.previous_migrations')).rows).toEqual([{id:'history',migration_name:'historical_migration'}]);
       expect((await pg.query("SELECT to_regclass('public.\"_prisma_migrations\"') AS old_table")).rows).toEqual([{old_table:null}]);
-      expect((await pg.query('SELECT count(*)::int AS count FROM supabase_migrations.schema_migrations')).rows).toEqual([{count:3}]);
+      const committedMigrations=readdirSync('supabase/migrations').filter(file=>/^\d{14}_[a-z0-9_]+\.sql$/.test(file)).length;
+      expect((await pg.query('SELECT count(*)::int AS count FROM supabase_migrations.schema_migrations')).rows).toEqual([{count:committedMigrations}]);
     } finally {await pg.close();}
   });
 });

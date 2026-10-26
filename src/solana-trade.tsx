@@ -27,7 +27,7 @@ export default function SolanaTrade() {
     });
   }
   const seconds = quote ? Math.max(0, Math.floor((Date.parse(quote.expiresAt) - clock) / 1000)) : 0;
-  return <><PageHeading label="JUPITER · SOLANA MAINNET" title="Your wallet. Your next move." description="Swap SOL and Solana tokens. Review each quote and approve each transaction in your wallet."/>
+  return <><PageHeading label="JUPITER · SOLANA MAINNET" title="Your wallet. Your next move." description="Swap SOL and Solana tokens. Review each quote and approve each transaction in your wallet."><Link className={s.textLink} to="/chat-trading">Set up WhatsApp trading <ArrowUpRight size={15}/></Link></PageHeading>
     {(error || desk.error) && <Notice error>{error || desk.error}</Notice>}{!desk.data ? <LoadingRows/> : <>
     {!desk.data.providers.swapsEnabled && <Notice>Trading setup required. The server needs a Jupiter API key and the swaps switch enabled. Your wallet remains under your control.</Notice>}
     <div className={s.tradeLayout}><section><div className={s.connectionSection}><div className={s.formTitle}><Wallet size={20}/><div><h2>Solana trading wallet</h2><p>Separate from your MetaMask workspace account.</p></div></div>

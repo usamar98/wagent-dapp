@@ -1,5 +1,10 @@
 // Application records stored in Supabase PostgreSQL. Keep in sync with SQL migrations.
 export interface ModelRows {
+  SolanaWalletWithdrawal: { id: string; userId: string; walletAddress: string; ownerAddress: string; mint: string; amount: string; signature: string; status: string; lastValidBlockHeight: string; error: string | null; createdAt: Date; updatedAt: Date };
+  SolanaTradingWallet: { userId: string; address: string; ownerAddress: string; encryptedSecret: string; createdAt: Date };
+  SolanaTradePermission: { id: string; userId: string; channelId: string; channelFingerprint: string; channelOwnerId: string; instanceId: string; ownerAddress: string; tradingAddress: string; allowedMints: string[]; perTradeLamports: string; dailyLamports: string; maxFeeLamports: string; slippageBps: number; expiresAt: Date; revokedAt: Date | null; revokeReason: string | null; consentMessage: string; signature: string; createdAt: Date };
+  SolanaPermissionChallenge: { id: string; userId: string; sessionId: string; purpose: string; address: string; message: string; payload: any; expiresAt: Date };
+  SolanaChatTrade: { id: string; userId: string; commandId: string; permissionId: string; walletAddress: string; side: string; mint: string; amount: string; budgetLamports: string; status: string; providerRequestId: string | null; signature: string | null; quote: any; error: string | null; createdAt: Date; updatedAt: Date };
   SolanaTokenDiscovery: { mint: string; firstSeenAt: Date; lastSeenAt: Date };
   SolanaWallet: { userId: string; address: string; verifiedAt: Date };
   SolanaWalletChallenge: { id: string; userId: string; sessionId: string; address: string; message: string; expiresAt: Date };
@@ -306,6 +311,11 @@ export interface ModelRows {
 export type ModelName = keyof ModelRows;
 
 export const databaseSchema = {
+  SolanaWalletWithdrawal: { columns:['id','userId','walletAddress','ownerAddress','mint','amount','signature','status','lastValidBlockHeight','error','createdAt','updatedAt'],primaryKey:['id'],unique:[['id'],['signature']],generatedId:true,updatedAt:['updatedAt'],json:[],relations:{} },
+  SolanaTradingWallet: { columns:['userId','address','ownerAddress','encryptedSecret','createdAt'],primaryKey:['userId'],unique:[['userId'],['address']],generatedId:false,updatedAt:[],json:[],relations:{} },
+  SolanaTradePermission: { columns:['id','userId','channelId','channelFingerprint','channelOwnerId','instanceId','ownerAddress','tradingAddress','allowedMints','perTradeLamports','dailyLamports','maxFeeLamports','slippageBps','expiresAt','revokedAt','revokeReason','consentMessage','signature','createdAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:[],json:[],relations:{} },
+  SolanaPermissionChallenge: { columns:['id','userId','sessionId','purpose','address','message','payload','expiresAt'],primaryKey:['id'],unique:[['id'],['userId','purpose']],generatedId:true,updatedAt:[],json:['payload'],relations:{} },
+  SolanaChatTrade: { columns:['id','userId','commandId','permissionId','walletAddress','side','mint','amount','budgetLamports','status','providerRequestId','signature','quote','error','createdAt','updatedAt'],primaryKey:['id'],unique:[['id'],['commandId'],['providerRequestId']],generatedId:true,updatedAt:['updatedAt'],json:['quote'],relations:{} },
   SolanaTokenDiscovery: { columns:['mint','firstSeenAt','lastSeenAt'],primaryKey:['mint'],unique:[['mint']],generatedId:false,updatedAt:[],json:[],relations:{} },
   SolanaWallet: { columns:['userId','address','verifiedAt'],primaryKey:['userId'],unique:[['userId'],['address']],generatedId:false,updatedAt:[],json:[],relations:{} },
   SolanaWalletChallenge: { columns:['id','userId','sessionId','address','message','expiresAt'],primaryKey:['id'],unique:[['id'],['userId']],generatedId:true,updatedAt:[],json:[],relations:{} },
