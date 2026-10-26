@@ -74,7 +74,7 @@ describe('existing database adoption', () => {
       expect((await pg.query('SELECT id,name FROM "User"')).rows).toEqual([{id:'existing-owner',name:'Existing owner'}]);
       expect((await pg.query('SELECT id,migration_name FROM wagent_internal.previous_migrations')).rows).toEqual([{id:'history',migration_name:'historical_migration'}]);
       expect((await pg.query("SELECT to_regclass('public.\"_prisma_migrations\"') AS old_table")).rows).toEqual([{old_table:null}]);
-      expect((await pg.query('SELECT count(*)::int AS count FROM supabase_migrations.schema_migrations')).rows).toEqual([{count:1}]);
+      expect((await pg.query('SELECT count(*)::int AS count FROM supabase_migrations.schema_migrations')).rows).toEqual([{count:2}]);
     } finally {await pg.close();}
   });
 });

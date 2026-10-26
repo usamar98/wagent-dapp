@@ -54,6 +54,12 @@ async function deliverPending(channel: { id: string; ownerId: string | null; enc
   const claimed = await db.agentCommand.updateMany({ where: { id: commandId, channelId: channel.id, recipientId: channel.ownerId, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'SENDING' } });
   if (!claimed.count) return;
   const command = await db.agentCommand.findUniqueOrThrow({ where: { id: commandId } });
+  if(command.source==='ALERT'){
+    const user=await db.user.findUnique({where:{id:command.userId}});
+    const event=command.externalId?await db.solanaAlertEvent.findUnique({where:{id:command.externalId}}):null;
+    const rule=event?await db.solanaAlertRule.findUnique({where:{id:event.ruleId}}):null;
+    if(!user||user.disabled||user.emergencyStop||!rule?.enabled){await db.agentCommand.update({where:{id:command.id},data:{deliveryStatus:'CANCELLED'}});return;}
+  }
   try {
     const messageId = await sendReply(decrypt(channel.encryptedToken), channel.ownerId, command.reply);
     await db.agentCommand.update({ where: { id: command.id }, data: { deliveryStatus: 'SENT', replyMessageId: messageId } });
@@ -96,7 +102,7 @@ export async function syncPersonalAgent(userId: string) {
           const pairing = message.text?.body.trim().match(/^link ([A-F0-9]{12})$/i);
           if (!pairing || !fresh.pairingHash || hash(pairing[1].toUpperCase()) !== fresh.pairingHash || !fresh.pairingExpiresAt || fresh.pairingExpiresAt < new Date()) continue;
           // Meta rejects sends to anyone other than this agent's creator.
-          await sendReply(decrypt(fresh.encryptedToken), message.from, 'Wagent Ai connected. Select your Solana agent in Connections on the website. Send Help or Status to check your setup. Live buy/sell and automated token alerts are coming soon. Pairing does not authorize access to wallet funds.');
+          await sendReply(decrypt(fresh.encryptedToken), message.from, 'Wagent Ai connected. Select your Solana agent in Connections. Send Help for swap review commands. Configure token alerts on the website. Each swap requires your Solana wallet signature. Pairing does not authorize access to wallet funds.');
           await transaction(async tx => {
             await lockUser(tx, userId);
             await tx.personalAgentChannel.updateMany({ where: { id: fresh.id, leaseToken: lease, pairingHash: fresh.pairingHash, enabled: true }, data: { ownerId: message.from, agentId: entry.id, pairingHash: null, pairingExpiresAt: null, lastMessageAt: new Date() } });

@@ -92,9 +92,9 @@ describe('Solana discovery and private watchlists',()=>{
     await post('solana/watchlist',{mint:solMint,watched:false});expect((await client.get('/api/solana/watchlist')).body.mints).toEqual([jupMint]);
     expect((await post('solana/watchlist',{mint:solMint,watched:true,userId:otherId})).status).toBe(400);
   });
-  it('enforces Coming soon for orders and monitoring outside demo fixtures',async()=>{
+  it('rejects legacy paper execution commands outside demo fixtures',async()=>{
     const {env}=await import('../server/env.js');const old=env.demo;env.demo=false;
-    try { const before=await db.tradeIntent.count();for(const text of ['Buy $10 of SOL','Start agent','CONFIRM 1234ABCD']){const result=await command(text);expect(result.body.command.status).toBe('REJECTED');expect(result.body.command.reply).toContain('coming soon');}expect(await db.tradeIntent.count()).toBe(before);expect((await post('checkout',{agentId:'fixture'})).status).toBe(409);expect((await client.get('/api/marketplace')).status).toBe(409);expect((await post(`instances/${instanceId}/control`,{action:'start'})).status).toBe(409); }
+    try { const before=await db.tradeIntent.count();for(const text of ['Buy $10 of SOL','Start agent','CONFIRM 1234ABCD']){const result=await command(text);expect(result.body.command.status).toBe('REJECTED');expect(result.body.command.reply).toContain('Solana wallet signature');}expect(await db.tradeIntent.count()).toBe(before);expect((await post('checkout',{agentId:'fixture'})).status).toBe(409);expect((await client.get('/api/marketplace')).status).toBe(409);expect((await post(`instances/${instanceId}/control`,{action:'start'})).status).toBe(409); }
     finally {env.demo=old;}
   });
 });

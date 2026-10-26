@@ -3,7 +3,8 @@ import { env } from './env.js';
 import { db } from './db.js';
 import express from 'express';
 import { resolve } from 'node:path';
+import { providerStatus } from './solana-providers.js';
 if(env.production||process.env.SERVE_STATIC==='true') { app.use(express.static(resolve('dist/web')));app.get('/{*path}',(_req,res)=>res.sendFile(resolve('dist/web/index.html'))); }
 app.use(errorHandler);
-const server=app.listen(env.port,'0.0.0.0',()=>console.log(`Wagent Ai API: http://localhost:${env.port} | Solana workspace | Live execution: coming soon | Demo: ${env.demo}`));
+const server=app.listen(env.port,'0.0.0.0',()=>console.log(`Wagent Ai API: http://localhost:${env.port} | Solana workspace | Swaps: ${providerStatus().swapsEnabled?'wallet approval':'setup required'} | Demo: ${env.demo}`));
 for(const sig of ['SIGINT','SIGTERM'] as const) process.on(sig,()=>server.close(async()=>{await db.close();process.exit(0);}));

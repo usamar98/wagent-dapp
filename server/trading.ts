@@ -8,9 +8,11 @@ import { configSchema } from '../shared/config.js';
 import { parseCommand } from '../shared/commands.js';
 import { riskBudget, simulatedFeed } from '../shared/strategies.js';
 import { env } from './env.js';
+import { isSolanaAddress } from '../shared/solana.js';
+import { providerStatus } from './solana-providers.js';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-const help = 'WAGENT AI · SOLANA · Create your agent on the website and select it in Connections. Try Status; Show portfolio; Pause agent; Stop all. Live buy/sell, new-pool alerts, and automated price/liquidity alerts are coming soon. Earlier paper balances are simulations, not wallet balances. No funds move.';
+const help = 'WAGENT AI · SOLANA · Try Status; Stop all; Buy 0.1 SOL of <mint>; Sell 100 of <mint>. Buy/sell opens a website review. You must sign each swap in your Solana wallet. Create price, liquidity, or new-pool alert rules on the website. Earlier paper balances are simulations.';
 
 export async function getWorkspace(userId: string) {
   return transaction(async tx => {
@@ -29,7 +31,7 @@ export async function getWorkspace(userId: string) {
     workspace, versions: versions.filter(v => configSchema.safeParse(v.config).success), instances, commands: commands.reverse(), intents,
     channel: channel ? { label:channel.label, paired:!!channel.ownerId, enabled:channel.enabled, pairingExpiresAt:channel.pairingExpiresAt, lastPollAt:channel.lastPollAt, lastMessageAt:channel.lastMessageAt, lastError:channel.lastError } : null,
     network: 'solana', dataProvider: 'DEX Screener', workerOnline: !!worker && Date.now() - Number(worker.value) < 30000,
-    liveTrading: false,
+    liveTrading: providerStatus().swapsEnabled,
   };
   });
 }
@@ -57,15 +59,39 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
     if (existing) return { command: existing, duplicate: true };
     let reply = '', status = 'COMPLETED', intentId: string | undefined;
     try {
+      const tradeLink=/^(buy|sell)\s+(\d{1,12}(?:\.\d{1,18})?)\s+(SOL\s+of|of)\s+([1-9A-HJ-NP-Za-km-z]{32,44})$/i.exec(text.trim());
+      if(!env.demo&&tradeLink){
+        check(!user.emergencyStop,409,'Emergency stop is active. Clear it on the website first.');
+        const side=tradeLink[1].toUpperCase(),amount=tradeLink[2],mint=tradeLink[4];
+        check(isSolanaAddress(mint)&&Number(amount)>0,400,'Use a valid mint and positive amount.');
+        check(side==='BUY'?tradeLink[3].toLowerCase()==='sol of':tradeLink[3].toLowerCase()==='of',400,'Use Buy <SOL amount> SOL of <mint>, or Sell <token amount> of <mint>.');
+        const link=new URL('/trade',env.appUrl);link.search=new URLSearchParams({side,mint,amount}).toString();
+        reply=`SOLANA SWAP REVIEW · ${side==='BUY'?`Spend ${amount} SOL`:`Sell ${amount} tokens`}\nMint: ${mint}\n${link}\nSign in, review a fresh Jupiter quote, and approve it in your linked Solana wallet. This message does not submit an order.${providerStatus().swapsEnabled?'':' Jupiter trading setup is still required.'}`;
+        const saved=await tx.agentCommand.create({data:{userId,source,externalId,text,reply,status:'COMPLETED',channelId:channelContext?.id,recipientId:channelContext?.ownerId,deliveryStatus:source==='WHATSAPP'?'PENDING':'NOT_REQUIRED',createdAt:now}});return {command:saved,duplicate:false};
+      }
       const command = parseCommand(text);
       if (command.kind === 'invalid') throw new AppError(400, command.reason);
-      if (!env.demo && (command.kind === 'trade' || command.kind === 'confirm' || command.kind === 'start')) throw new AppError(409, 'Solana buy/sell and automated token monitoring are coming soon. Your saved agent and WhatsApp pairing are available now. No order was sent.');
+      if (!env.demo && (command.kind === 'trade' || command.kind === 'confirm' || command.kind === 'start')) throw new AppError(409, 'Use Buy <amount> SOL of <mint> or Sell <amount> of <mint> for a website review link. Each real swap needs a Solana wallet signature on the website. Configure automatic alerts in Token alerts.');
       if (command.kind === 'help') reply = help;
       else if (command.kind === 'emergency') {
         await tx.user.update({ where: { id: userId }, data: { emergencyStop: true } });
         await tx.instance.updateMany({ where: { userId }, data: { status: 'STOPPED' } });
         await tx.tradeIntent.updateMany({ where: { userId, status: 'PENDING' }, data: { status: 'CANCELLED' } });
+        await tx.solanaSwap.updateMany({where:{userId,status:'QUOTED'},data:{status:'CANCELLED'}});
+        await tx.agentCommand.updateMany({where:{userId,source:'ALERT',deliveryStatus:{in:['PENDING','RETRY']}},data:{deliveryStatus:'CANCELLED'}});
         reply = 'EMERGENCY STOP · All agents stopped and pending orders cancelled. Clear the stop on the website before starting again.';
+      } else if(!env.demo&&['status','portfolio','pause','stop'].includes(command.kind)){
+        const wallet=await tx.solanaWallet.findUnique({where:{userId}});
+        if(command.kind==='status'){
+          const enabled=await tx.solanaAlertRule.count({where:{userId,enabled:true}});
+          reply=`WAGENT AI · SOLANA\nTrading: ${providerStatus().swapsEnabled?'Jupiter ready, wallet approval required':'Jupiter setup required'}\nSolana wallet: ${wallet?.address||'not linked'}\nActive alert rules: ${enabled}\nEmergency stop: ${user.emergencyStop?'active':'off'}\nManage alerts: ${new URL('/alerts',env.appUrl)}\nEach real swap requires a website review and wallet signature.`;
+        }else if(command.kind==='portfolio')reply=`SOLANA WALLET · ${wallet?.address||'Link a Solana wallet in Buy & sell first.'}\nOpen your wallet to view current holdings. Wagent Ai does not substitute paper balances for on-chain funds.\n${new URL('/trade',env.appUrl)}`;
+        else{
+          await tx.solanaAlertRule.updateMany({where:{userId,enabled:true},data:{enabled:false}});
+          await tx.agentCommand.updateMany({where:{userId,source:'ALERT',deliveryStatus:{in:['PENDING','RETRY']}},data:{deliveryStatus:'CANCELLED'}});
+          await tx.solanaSwap.updateMany({where:{userId,status:'QUOTED'},data:{status:'CANCELLED'}});
+          reply=`WORKSPACE PAUSED · Alert rules paused and unsigned swap quotes cancelled. Enable individual rules on the website to resume. Already-submitted transactions cannot be recalled.\n${new URL('/alerts',env.appUrl)}`;
+        }
       } else {
         const { workspace, instance, config } = await activeRuntime(tx, userId);
         if (command.kind === 'status') reply = `PAPER MODE · ${instance.version.agent.name} v${instance.version.number} is ${instance.status.toLowerCase()}. Cash: ${usd(instance.cashCents)}. ${instance.positions.length} open position(s). Order limit: ${usd(workspace.maxOrderCents)}. Live trading is unavailable.`;

@@ -11,10 +11,12 @@ A Solana-only agent workspace. Create a private token configuration, pair your p
 - Liquidity filtering, pool age, volume, mint copying, and direct DEX Screener / DEXTools research links.
 - Private account-scoped watchlists stored in Supabase, with up to 30 mints.
 - Activity history, ownership isolation, and emergency stop.
+- Jupiter exact-input SOL/token swaps with one-use Solana wallet ownership proofs, a review screen, and wallet approval for every transaction.
+- DEX Screener price/liquidity alerts and DEXTools v3 price/new-pool alerts, delivered in app or to the explicitly selected paired WhatsApp chat.
 
 ## Coming soon
 
-Live token buying with SOL and selling back to SOL; Solana transaction signing; new-pool, price, volume and liquidity alerts; take-profit and stop-loss; and agent marketplace licensing. These screens do not submit orders or schedule notifications. Production rejects order creation, confirmation and runtime start commands. The background worker only handles personal-agent polling/replies and its heartbeat. Earlier paper records are preserved. Paper execution remains in isolated demo/test fixtures only.
+Automatic take-profit/stop-loss, volume alerts, and agent marketplace licensing remain upcoming. Each real swap requires a website wallet signature. Personal WhatsApp buy/sell commands return review links rather than submitting orders. Earlier paper records are preserved; paper execution remains in isolated demo/test fixtures only.
 
 Coinbase OAuth has been removed. Historical broker database tables and encrypted records are retained for recovery and are not accessed by the active integration. Other markets are not offered or accepted in new configurations. Existing incompatible strategies remain stored and are not runnable.
 
@@ -33,9 +35,9 @@ npm run dev
 
 Open http://localhost:5173. The API uses port 4000. The launcher starts the API, Vite, and the worker against Supabase without seeding hosted data. Keep the worker on a persistent host for automatic message polling. A Vercel website deployment alone does not keep that process alive.
 
-Core environment: DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY, APP_URL, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test. Only DATABASE_URL is used, with verified TLS and the included public Supabase CA. No DIRECT_URL, Prisma account, Coinbase key, shared WhatsApp key, DEX Screener key, DEXTools API key, or AI key is required for the currently available features. Each user supplies their personal agent key in Connections.
+Core environment: DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY, APP_URL, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test. Only DATABASE_URL is used, with verified TLS and the included public Supabase CA. Add JUPITER_API_KEY and SOLANA_SWAPS_ENABLED=true for swaps; add DEXTOOLS_API_KEY for DEXTools alerts. DEX Screener needs no key. Birdeye, Coinbase, and AI keys are not used. Each user supplies their personal WhatsApp agent key in Connections. See [provider setup and exact Vercel variables](docs/SOLANA-PROVIDERS.md).
 
-See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All 29 application tables retain backend-only access. Watchlists use a per-user Setting key; no schema migration or destructive database change is needed for this release.
+See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All 34 application tables retain backend-only access. The Solana migration adds five tables without deleting existing data. Watchlists use a per-user Setting key.
 
 ## Data-source behavior
 
@@ -44,7 +46,7 @@ See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deploy
 - Pool creation time is not token mint age. Symbols and names are not verified identities. Liquidity and listings do not certify safety.
 - Provider failures show an error. A cached result may be returned for up to five minutes, explicitly marked stale with its original fetch time. No fabricated prices replace failed responses.
 - Public upstream calls are cached, coalesced, rate-limited, time-bounded, response-size bounded and restricted to a fixed DEX Screener origin. There is no user-supplied upstream URL.
-- DEXTools research links open its external app. Its paid API is not connected. Data APIs do not authorize Wagent Ai to operate an external trading account or wallet.
+- DEXTools v3 supplies prices and newly indexed pools with the configured server key. Alert coverage is bounded and described in docs/SOLANA-PROVIDERS.md. Data APIs do not authorize wallet transactions.
 
 References: https://docs.dexscreener.com/api/reference and https://developer.dextools.io/.
 

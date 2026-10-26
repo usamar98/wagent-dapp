@@ -4,10 +4,10 @@
 product
 
 ## Users
-People create a private Solana token agent and pair their own personal WhatsApp agent. A MetaMask message identifies the workspace account. Solana transaction signing is a separate, upcoming capability.
+People create a private Solana token agent and pair their own personal WhatsApp agent. A MetaMask message identifies the workspace account. A separate Solana wallet proves ownership and approves every real swap.
 
 ## Product Purpose
-Build a Solana agent and connect its conversation. Available now: private agent configurations, personal WhatsApp ownership pairing, Solana-only DEX Screener token discovery, and account-scoped mint watchlists. DEXTools opens as external research. Live buy/sell, Solana wallet signing, automated new-pool/price/liquidity alerts, exit rules, and the marketplace are Coming soon. No Coinbase integration or other asset markets remain in the product flow. Old records are preserved. Isolated demo fixtures retain simulated paper execution.
+Build a Solana agent and connect its conversation. Available now: private agents, WhatsApp ownership pairing, DEX Screener discovery, private watchlists, Jupiter swaps with explicit wallet approval, and configurable price/liquidity/new-pool alerts using DEX Screener and DEXTools v3. Missing provider keys show setup required. Background alerts and WhatsApp delivery require a persistent worker. Chat buy/sell requests produce website review links. Exit automation and the marketplace remain Coming soon. Coinbase and Birdeye are not used. Old records are preserved; isolated demos retain paper execution.
 
 ## Brand Personality
 Calm, precise, independent. A useful marketplace with credible detail and no profitability promises.

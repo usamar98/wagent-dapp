@@ -3,22 +3,21 @@ const mint='So11111111111111111111111111111111111111112';
 const token={mint,pairAddress:mint,name:'Browser fixture token',symbol:'FIXTURE',dex:'fixture',priceUsd:1,change24h:2,volume24h:3000,liquidityUsd:20000,marketCap:null,pairCreatedAt:Date.now()-3600000,screenerUrl:`https://dexscreener.com/solana/${mint}`,toolsUrl:`https://www.dextools.io/app/en/solana/pair-explorer/${mint}`};
 const feed={tokens:[token],source:'DEX Screener',fetchedAt:new Date().toISOString(),stale:false,coverage:'Browser-only fixture'};
 
-test('Solana discovery, Coming soon features, responsive navigation and contained tables',async({page})=>{
+test('Solana discovery, protected trading, responsive navigation and contained tables',async({page})=>{
   await page.route('**/api/solana/tokens**',route=>route.fulfill({json:feed}));
   await page.route('**/api/bootstrap',route=>route.fulfill({json:{user:null,demo:false}}));
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto('/');await expect(page.getByRole('heading',{name:'Your Solana edge. One WhatsApp away.'})).toBeVisible();
   await expect(page.getByRole('link',{name:'Open FIXTURE on DEXTools'})).toHaveAttribute('href',token.toolsUrl);
-  await page.getByRole('link',{name:'Buy & sell Coming soon',exact:true}).click();
-  await expect(page.getByRole('heading',{name:'Your tokens. Your next move.'})).toBeVisible();
-  await expect(page.getByText('This feature is not enabled. No orders are sent and no automated alerts are scheduled.')).toBeVisible();
-  await page.getByRole('link',{name:'Explore tokens',exact:true}).click();
+  await page.getByRole('link',{name:'Buy & sell',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Your agent starts here.'})).toBeVisible();
+  await page.getByRole('link',{name:'Token explorer',exact:true}).click();
   await page.getByRole('textbox',{name:'Search Solana tokens'}).fill(mint);await page.getByRole('button',{name:'Search',exact:true}).click();
   await expect(page).toHaveURL(new RegExp('q='+mint));
   await page.setViewportSize({width:390,height:844});
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.getByRole('button',{name:'Open navigation'}).click();await expect(page.getByRole('link',{name:'WhatsApp connection',exact:true})).toBeVisible();
-  await page.getByRole('link',{name:'Token alerts Coming soon',exact:true}).click();await expect(page.getByRole('heading',{name:'Stay close to what’s moving.'})).toBeVisible();
+  await page.getByRole('link',{name:'Token alerts',exact:true}).click();await expect(page.getByRole('heading',{name:'Your agent starts here.'})).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -34,7 +33,7 @@ test('private builder saves exact Solana mints and points to WhatsApp setup',asy
   await expect(page.getByRole('link',{name:'Connect WhatsApp',exact:true})).toHaveAttribute('href','/connections');
 });
 
-test('MetaMask identity is clearly separate from upcoming Solana signing',async({page})=>{
+test('MetaMask identity is clearly separate from Solana transaction signing',async({page})=>{
   await page.route('**/api/bootstrap',route=>route.fulfill({json:{user:null,demo:false}}));
   await page.goto('/auth');await expect(page.getByRole('heading',{name:'Connect your account',exact:true})).toBeVisible();
   await expect(page.getByText(/This connects your workspace identity using an EVM account/)).toBeVisible();

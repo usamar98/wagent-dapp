@@ -16,6 +16,9 @@ import { createOrder, applyPaymentEvent, handleStripeWebhook, stripeClient } fro
 import { tradingRouter } from './trading.js';
 import { personalWhatsAppRouter } from './personal-whatsapp.js';
 import { solanaRouter } from './solana.js';
+import { solanaSwapsRouter } from './solana-swaps.js';
+import { solanaAlertsRouter } from './solana-alerts.js';
+import { providerStatus } from './solana-providers.js';
 
 export const app=express();
 app.disable('x-powered-by');
@@ -50,11 +53,13 @@ app.use('/api/instances/:id/control',(req,_res,next)=>{
   next();
 });
 const authLimit=rateLimit({windowMs:15*60000,limit:env.demo?100:15,message:{error:'Too many authentication attempts. Try again later.'}});
-app.get('/api/health',async(_req,res)=>{await db.sql`SELECT 1`;res.json({ok:true,demo:env.demo,network:'solana',execution:env.demo?'paper_only':'coming_soon'});});
-app.get('/api/bootstrap',async(req,res)=>{res.json({user:req.user||null,demo:env.demo,costs,licenseTerms,commissionBps:Number((await db.setting.findUnique({where:{key:'commissionBps'}}))?.value||1000),whatsapp:{enabled:true,platform:'personal_agent',execution:'paper_only',termsUrl:'https://www.whatsapp.com/legal/third-party-agents-terms'},stripeEnabled:env.paymentsEligible&&env.stripeKey.startsWith('sk_test_')});});
+app.get('/api/health',async(_req,res)=>{await db.sql`SELECT 1`;res.json({ok:true,demo:env.demo,network:'solana',execution:env.demo?'paper_only':providerStatus().swapsEnabled?'wallet_approved':'setup_required'});});
+app.get('/api/bootstrap',async(req,res)=>{res.json({user:req.user||null,demo:env.demo,costs,licenseTerms,commissionBps:Number((await db.setting.findUnique({where:{key:'commissionBps'}}))?.value||1000),whatsapp:{enabled:true,platform:'personal_agent',execution:env.demo?'paper_only':'website_wallet_approval',termsUrl:'https://www.whatsapp.com/legal/third-party-agents-terms'},stripeEnabled:env.paymentsEligible&&env.stripeKey.startsWith('sk_test_')});});
 app.use('/api/trading', tradingRouter);
 app.use('/api/whatsapp-agent', personalWhatsAppRouter);
 app.use('/api/solana', solanaRouter);
+app.use('/api/solana', solanaSwapsRouter);
+app.use('/api/solana', solanaAlertsRouter);
 app.use('/api/auth/wallet',walletAuth);
 app.post('/api/auth/logout',async(req,res)=>{if(req.cookies?.ab_session)await db.session.deleteMany({where:{id:hash(req.cookies.ab_session)}});res.clearCookie('ab_session',{path:'/'}).clearCookie('ab_wallet_challenge',{path:'/api/auth/wallet'}).json({ok:true});});
 
@@ -88,7 +93,7 @@ app.post('/api/orders/:id/simulate',auth,async(req,res)=>{check(env.demo,403,'De
 app.post('/api/instances',auth,async(req,res)=>{const {versionId}=z.object({versionId:z.string()}).parse(req.body);res.status(201).json(await transaction(async tx=>{await lockUser(tx,req.user!.id);await canUseVersion(tx,req.user!.id,versionId);return tx.instance.upsert({where:{userId_versionId:{userId:req.user!.id,versionId}},create:{userId:req.user!.id,versionId},update:{}});}));});
 app.post('/api/instances/:id/control',auth,async(req,res)=>{const {action}=z.object({action:z.enum(['start','pause','stop'])}).parse(req.body);const instance=await transaction(async tx=>{await lockUser(tx,req.user!.id);const user=await tx.user.findUniqueOrThrow({where:{id:req.user!.id}});const i=await tx.instance.findFirst({where:{id:String(req.params.id),userId:user.id}});check(i,404,'Runtime not found');if(action==='start'){check(!user.emergencyStop,409,'Clear emergency stop in Connections before starting');await canUseVersion(tx,user.id,i.versionId);}if(action!=='start')await tx.tradeIntent.updateMany({where:{userId:user.id,instanceId:i.id,status:'PENDING'},data:{status:'CANCELLED'}});return tx.instance.update({where:{id:i.id},data:{status:action==='start'?'RUNNING':action==='pause'?'PAUSED':'STOPPED'}});});res.json(instance);});
 app.post('/api/instances/:id/run',auth,async(req,res)=>{check(await db.instance.findFirst({where:{id:String(req.params.id),userId:req.user!.id}}),404,'Runtime not found');res.json(await runInstance(String(req.params.id)));});
-app.post('/api/emergency-stop',auth,async(req,res)=>{await transaction(async tx=>{await lockUser(tx,req.user!.id);await tx.user.update({where:{id:req.user!.id},data:{emergencyStop:true}});await tx.instance.updateMany({where:{userId:req.user!.id},data:{status:'STOPPED'}});await tx.tradeIntent.updateMany({where:{userId:req.user!.id,status:'PENDING'},data:{status:'CANCELLED'}});});res.json({ok:true});});
+app.post('/api/emergency-stop',auth,async(req,res)=>{await transaction(async tx=>{await lockUser(tx,req.user!.id);await tx.user.update({where:{id:req.user!.id},data:{emergencyStop:true}});await tx.instance.updateMany({where:{userId:req.user!.id},data:{status:'STOPPED'}});await tx.tradeIntent.updateMany({where:{userId:req.user!.id,status:'PENDING'},data:{status:'CANCELLED'}});await tx.solanaSwap.updateMany({where:{userId:req.user!.id,status: "QUOTED"},data:{status: "CANCELLED"}});await tx.agentCommand.updateMany({where:{userId:req.user!.id,source: "ALERT",deliveryStatus:{in:["PENDING","RETRY"]}},data:{deliveryStatus: "CANCELLED"}});});res.json({ok:true});});
 app.post('/api/emergency-stop/clear',auth,async(req,res)=>{await transaction(async tx=>{await lockUser(tx,req.user!.id);await tx.user.update({where:{id:req.user!.id},data:{emergencyStop:false}});});res.json({ok:true});});
 app.get('/api/notifications',auth,async(req,res)=>res.json(await db.notification.findMany({where:{userId:req.user!.id},orderBy:{createdAt:'desc'},take:100})));
 app.post('/api/notifications/read',auth,async(req,res)=>{await db.notification.updateMany({where:{userId:req.user!.id,readAt:null},data:{readAt:new Date()}});res.json({ok:true});});
