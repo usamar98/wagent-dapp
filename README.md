@@ -8,11 +8,11 @@ A Solana-only agent workspace. Create a private token configuration, pair your p
 - Private agent creation with 1–10 Solana token mints.
 - Agent selection, encrypted personal WhatsApp keys, one-time ownership pairing, manual sync, and background polling.
 - Real Solana token discovery and mint search from DEX Screener, refreshed every 60 seconds.
-- Liquidity filtering, pool age, volume, mint copying, and direct DEX Screener / DEXTools research links.
+- Liquidity filtering, pool age, volume, mint copying, and direct DEX Screener research links.
 - Private account-scoped watchlists stored in Supabase, with up to 30 mints.
 - Activity history, ownership isolation, and emergency stop.
 - Jupiter exact-input SOL/token swaps with one-use Solana wallet ownership proofs, a review screen, and wallet approval for every transaction.
-- DEX Screener price/liquidity alerts and DEXTools v3 price/new-pool alerts, delivered in app or to the explicitly selected paired WhatsApp chat.
+- DEX Screener token discovery, price, and liquidity alerts, delivered in app or to the explicitly selected paired WhatsApp chat.
 
 ## Coming soon
 
@@ -35,9 +35,9 @@ npm run dev
 
 Open http://localhost:5173. The API uses port 4000. The launcher starts the API, Vite, and the worker against Supabase without seeding hosted data. Keep the worker on a persistent host for automatic message polling. A Vercel website deployment alone does not keep that process alive.
 
-Core environment: DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY, APP_URL, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test. Only DATABASE_URL is used, with verified TLS and the included public Supabase CA. Add JUPITER_API_KEY and SOLANA_SWAPS_ENABLED=true for swaps; add DEXTOOLS_API_KEY for DEXTools alerts. DEX Screener needs no key. Birdeye, Coinbase, and AI keys are not used. Each user supplies their personal WhatsApp agent key in Connections. See [provider setup and exact Vercel variables](docs/SOLANA-PROVIDERS.md).
+Core environment: DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY, APP_URL, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test. Only DATABASE_URL is used, with verified TLS and the included public Supabase CA. Add JUPITER_API_KEY and SOLANA_SWAPS_ENABLED=true for swaps. DEX Screener needs no key. Birdeye, Coinbase, and AI keys are not used. Each user supplies their personal WhatsApp agent key in Connections. See [provider setup and exact Vercel variables](docs/SOLANA-PROVIDERS.md).
 
-See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All 34 application tables retain backend-only access. The Solana migration adds five tables without deleting existing data. Watchlists use a per-user Setting key.
+See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All 35 application tables retain backend-only access. The latest migration preserves old alerts, switches their data source to DEX Screener, and stores token discovery history and each WhatsApp channel’s website origin. Watchlists use a per-user Setting key.
 
 ## Data-source behavior
 
@@ -46,9 +46,9 @@ See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deploy
 - Pool creation time is not token mint age. Symbols and names are not verified identities. Liquidity and listings do not certify safety.
 - Provider failures show an error. A cached result may be returned for up to five minutes, explicitly marked stale with its original fetch time. No fabricated prices replace failed responses.
 - Public upstream calls are cached, coalesced, rate-limited, time-bounded, response-size bounded and restricted to a fixed DEX Screener origin. There is no user-supplied upstream URL.
-- DEXTools v3 supplies prices and newly indexed pools with the configured server key. Alert coverage is bounded and described in docs/SOLANA-PROVIDERS.md. Data APIs do not authorize wallet transactions.
+- Discovery alerts establish a baseline on the first successful scan and then report newly observed mints from the latest Solana profiles. Persistent first-seen records prevent rediscovery after restarts. This is limited discovery coverage, not every token launch. Data APIs do not authorize wallet transactions.
 
-References: https://docs.dexscreener.com/api/reference and https://developer.dextools.io/.
+References: https://docs.dexscreener.com/api/reference.
 
 ## Verification
 

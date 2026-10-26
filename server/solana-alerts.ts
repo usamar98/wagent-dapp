@@ -4,30 +4,17 @@ import { z } from 'zod';
 import { db, transaction, lockUser, type Tx } from './db.js';
 import { auth, check, AppError, token } from './security.js';
 import { rateLimitKey } from './rate-limit.js';
-import { addressSchema, providerStatus, newToolsPools, toolsTokenPrice, type ToolsPool } from './solana-providers.js';
+import { addressSchema, providerStatus } from './solana-providers.js';
 import { discoverTokens } from './solana.js';
+import { clearDiscoveryCache, observeDiscoveries } from './solana-discovery.js';
+import type { TokenFeed } from '../shared/solana.js';
 import type { ModelRows } from './database/schema.js';
 
 type Rule=ModelRows['SolanaAlertRule'];
-const ruleInput=z.object({name:z.string().trim().min(2).max(80),kind:z.enum(['PRICE_ABOVE','PRICE_BELOW','LIQUIDITY_BELOW','NEW_POOL']),source:z.enum(['DEX_SCREENER','DEXTOOLS']),mint:addressSchema.nullable(),threshold:z.number().finite().positive().max(1e15).nullable(),delivery:z.enum(['IN_APP','BOTH']),minLiquidityUsd:z.number().finite().min(0).max(1e15).default(0),maxPoolAgeMinutes:z.number().int().min(1).max(1440).default(60),cooldownMinutes:z.number().int().min(5).max(10080).default(30)}).strict().superRefine((v,c)=>{
-  if(v.kind==='NEW_POOL'?(v.source!=='DEXTOOLS'||v.mint!==null||v.threshold!==null):(v.mint===null||v.threshold===null))c.addIssue({code:'custom',message:'New-pool rules use DEXTools without a mint/price; other rules need an exact mint and threshold.'});
-  if(v.kind==='LIQUIDITY_BELOW'&&v.source!=='DEX_SCREENER')c.addIssue({code:'custom',message:'Liquidity thresholds use DEX Screener’s most liquid indexed pool.'});
+const ruleInput=z.object({name:z.string().trim().min(2).max(80),kind:z.enum(['PRICE_ABOVE','PRICE_BELOW','LIQUIDITY_BELOW','NEW_DISCOVERY']),source:z.literal('DEX_SCREENER'),mint:addressSchema.nullable(),threshold:z.number().finite().positive().max(1e15).nullable(),delivery:z.enum(['IN_APP','BOTH']),minLiquidityUsd:z.number().finite().min(0).max(1e15).default(0),maxDiscoveryAgeMinutes:z.number().int().min(1).max(1440).default(60),cooldownMinutes:z.number().int().min(5).max(10080).default(30)}).strict().superRefine((v,c)=>{
+  if(v.kind==='NEW_DISCOVERY'?(v.mint!==null||v.threshold!==null):(v.mint===null||v.threshold===null))c.addIssue({code:'custom',message:'Discovery rules do not use a mint/threshold. Price and liquidity rules need an exact mint and threshold.'});
 });
-let poolsPending:Promise<{pools:ToolsPool[];complete:boolean;at:Date}>|undefined;
-let poolCache:{pools:ToolsPool[];complete:boolean;at:Date}|undefined;
-const priceCache=new Map<string,{price:number;at:Date}>();
-const pricePending=new Map<string,Promise<{price:number;at:Date}>>();
-export function clearAlertProviderCache(){poolCache=undefined;poolsPending=undefined;priceCache.clear();pricePending.clear();}
-async function pools(){
-  if(poolCache&&Date.now()-poolCache.at.getTime()<60000)return poolCache;
-  if(!poolsPending)poolsPending=newToolsPools(new Date(Date.now()-86400000),new Date()).then(data=>poolCache={...data,at:new Date()}).finally(()=>{poolsPending=undefined;});
-  return poolsPending;
-}
-async function toolsPrice(mint:string){
-  const cached=priceCache.get(mint);if(cached&&Date.now()-cached.at.getTime()<60000)return cached;
-  if(!pricePending.has(mint))pricePending.set(mint,toolsTokenPrice(mint).then(price=>{if(priceCache.size>=200)priceCache.delete(priceCache.keys().next().value!);const observation={price,at:new Date()};priceCache.set(mint,observation);return observation;}).finally(()=>pricePending.delete(mint)));
-  return pricePending.get(mint)!;
-}
+export const clearAlertProviderCache=clearDiscoveryCache;
 async function emit(tx:Tx,rule:Rule,dedupeKey:string,title:string,body:string,snapshot:unknown){
   if(await tx.solanaAlertEvent.findFirst({where:{ruleId:rule.id,dedupeKey}}))return false;
   const event=await tx.solanaAlertEvent.create({data:{userId:rule.userId,ruleId:rule.id,dedupeKey,title,body,snapshot}});
@@ -45,9 +32,9 @@ async function cancelRuleDelivery(tx:Tx,userId:string,ruleId:string){
 export async function checkAlert(rule:Rule){
   try{
     check(providerStatus().alertsEnabled,503,'Alerts are disabled by the server.');
-    let observation:{at:Date;value:number;pair?:string}|undefined,launches:Awaited<ReturnType<typeof pools>>|undefined;
-    if(rule.kind==='NEW_POOL')launches=await pools();
-    else if(rule.source==='DEXTOOLS'){const data=await toolsPrice(rule.mint!);observation={at:data.at,value:data.price};}
+    let observation:{at:Date;value:number;pair?:string}|undefined,discovery:TokenFeed|undefined;
+    let discovered:ModelRows['SolanaTokenDiscovery'][]=[];
+    if(rule.kind==='NEW_DISCOVERY'){discovery=await discoverTokens();discovered=await observeDiscoveries(discovery);}
     else{
       const feed=await discoverTokens('',[rule.mint!]);check(!feed.stale&&Date.now()-Date.parse(feed.fetchedAt)<90000,502,'Fresh DEX Screener data is unavailable. The rule was not evaluated.');
       const found=feed.tokens.find(t=>t.mint===rule.mint),value=rule.kind==='LIQUIDITY_BELOW'?found?.liquidityUsd:found?.priceUsd;
@@ -58,26 +45,27 @@ export async function checkAlert(rule:Rule){
       const current=await tx.solanaAlertRule.findFirst({where:{id:rule.id,userId:rule.userId,enabled:true}}),user=await tx.user.findUnique({where:{id:rule.userId}});
       if(!current||!user||user.disabled||user.emergencyStop)return;
       const now=new Date();
-      if(launches){
+      if(discovery){
+        const at=new Date(discovery.fetchedAt);
+        if(!current.discoveryBaselineAt){await tx.solanaAlertRule.update({where:{id:current.id},data:{discoveryBaselineAt:new Date(Math.max(at.getTime(),current.createdAt.getTime())),lastCheckedAt:now,lastObservedAt:at,lastError:null}});return;}
         let count=0;
-        const previous=await tx.solanaAlertEvent.findMany({where:{ruleId:current.id,dedupeKey:{in:launches.pools.map(p=>p.address)}},select:{dedupeKey:true}});
+        const previous=await tx.solanaAlertEvent.findMany({where:{ruleId:current.id,dedupeKey:{in:discovery.tokens.map(t=>t.mint)}},select:{dedupeKey:true}});
         const reported=new Set(previous.map(e=>e.dedupeKey));
-        for(const pool of launches.pools){
-          const created=Date.parse(pool.creationTime);
-          if(reported.has(pool.address)||created<current.createdAt.getTime()||created>now.getTime()||now.getTime()-created>current.maxPoolAgeMinutes*60000||pool.liquidityUsd<current.minLiquidityUsd)continue;
-          // Each indexed pool is reported once. This does not claim a newly minted token.
-          const title=`New Solana pool · ${pool.mainToken.symbol}`;
-          const body=`${title}\n${pool.mainToken.name}\nMint: ${pool.mainToken.address}\nPool liquidity: $${pool.liquidityUsd.toLocaleString('en-US')}\nIndexed by DEXTools. Pool creation is not token mint creation.\nhttps://www.dextools.io/app/en/solana/pair-explorer/${pool.address}`;
-          if(await emit(tx,current,pool.address,title,body,pool))count++;
+        for(const item of discovery.tokens){
+          const seen=discovered.find(row=>row.mint===item.mint)?.firstSeenAt;
+          if(!seen||reported.has(item.mint)||seen<=current.discoveryBaselineAt||seen>now||now.getTime()-seen.getTime()>current.maxDiscoveryAgeMinutes*60000||item.liquidityUsd===null||item.liquidityUsd<current.minLiquidityUsd)continue;
+          const title=`Newly discovered Solana token · ${item.symbol}`;
+          const body=`${title}\n${item.name}\nMint: ${item.mint}\nPool liquidity: $${item.liquidityUsd.toLocaleString('en-US')}\nFirst observed by Wagent Ai: ${seen.toISOString()}\nSource: DEX Screener latest profiles. This is not a token launch time or a safety endorsement. Coverage is limited.\n${item.screenerUrl}`;
+          if(await emit(tx,current,item.mint,title,body,{...item,firstSeenAt:seen}))count++;
           if(count>=5)break;
         }
-        await tx.solanaAlertRule.update({where:{id:current.id},data:{lastCheckedAt:now,lastObservedAt:launches.at,lastError:!launches.complete?'Busy feed: only the newest 200 indexed pools were scanned. Some pools may be missed.':null,...(count?{lastTriggeredAt:now}:{})}});
+        await tx.solanaAlertRule.update({where:{id:current.id},data:{lastCheckedAt:now,lastObservedAt:at,lastError:null,...(count?{lastTriggeredAt:now}:{})}});
       }else if(observation){
         if(current.lastObservedAt&&current.lastObservedAt>=observation.at){await tx.solanaAlertRule.update({where:{id:current.id},data:{lastCheckedAt:now}});return;}
         const matches=current.kind==='PRICE_ABOVE'?observation.value>current.threshold!:observation.value<current.threshold!;
         const cooled=!current.lastTriggeredAt||now.getTime()-current.lastTriggeredAt.getTime()>=current.cooldownMinutes*60000;
         const trigger=matches&&!current.lastMatched&&cooled;
-        if(trigger){const title=`${current.name} · threshold reached`,body=`${title}\nMint: ${current.mint}\n${current.kind==='LIQUIDITY_BELOW'?'Pool liquidity':'Price'}: $${observation.value}\nThreshold: $${current.threshold}\nSource: ${current.source==='DEXTOOLS'?'DEXTools':'DEX Screener'}\nObserved: ${observation.at.toISOString()}\nThis alert does not place a trade.`;await emit(tx,current,observation.at.toISOString(),title,body,observation);}
+        if(trigger){const title=`${current.name} · threshold reached`,body=`${title}\nMint: ${current.mint}\n${current.kind==='LIQUIDITY_BELOW'?'Pool liquidity':'Price'}: $${observation.value}\nThreshold: $${current.threshold}\nSource: DEX Screener\nObserved: ${observation.at.toISOString()}\nThis alert does not place a trade.`;await emit(tx,current,observation.at.toISOString(),title,body,observation);}
         await tx.solanaAlertRule.update({where:{id:current.id},data:{lastCheckedAt:now,lastObservedAt:observation.at,lastMatched:matches,lastError:null,...(trigger?{lastTriggeredAt:now}:{})}});
       }
     });
@@ -110,7 +98,6 @@ solanaAlertsRouter.get('/alerts',async(req,res)=>{
 });
 solanaAlertsRouter.post('/alerts',async(req,res)=>{
   check(providerStatus().alertsEnabled,503,'Alerts are disabled by the server.');const input=ruleInput.parse(req.body);
-  check(input.source!=='DEXTOOLS'||providerStatus().dextools,503,'Add DEXTOOLS_API_KEY to enable this source. DEX Screener price and liquidity alerts work without a key.');
   const rule=await transaction(async tx=>{
     const userId=req.user!.id;await lockUser(tx,userId);check(!(await tx.user.findUniqueOrThrow({where:{id:userId}})).emergencyStop,409,'Clear emergency stop before adding alerts.');
     check(await tx.solanaAlertRule.count({where:{userId}})<20,400,'You can save up to 20 alert rules.');
@@ -120,7 +107,7 @@ solanaAlertsRouter.post('/alerts',async(req,res)=>{
 });
 solanaAlertsRouter.post('/alerts/:id/toggle',async(req,res)=>{
   const {enabled}=z.object({enabled:z.boolean()}).strict().parse(req.body);
-  await transaction(async tx=>{await lockUser(tx,req.user!.id);const rule=await tx.solanaAlertRule.findFirst({where:{id:String(req.params.id),userId:req.user!.id}});check(rule,404,'Alert rule not found.');if(enabled){check(providerStatus().alertsEnabled,503,'Alerts are disabled.');check(rule.source!=='DEXTOOLS'||providerStatus().dextools,503,'DEXTOOLS_API_KEY is required for this rule.');check(!(await tx.user.findUniqueOrThrow({where:{id:req.user!.id}})).emergencyStop,409,'Clear emergency stop first.');if(rule.delivery==='BOTH'){const channel=await tx.personalAgentChannel.findUnique({where:{userId:req.user!.id}});check(channel?.enabled&&channel.ownerId,409,'Pair WhatsApp before enabling this rule.');}}else await cancelRuleDelivery(tx,req.user!.id,rule.id);await tx.solanaAlertRule.update({where:{id:rule.id},data:{enabled}});});res.json({ok:true});
+  await transaction(async tx=>{await lockUser(tx,req.user!.id);const rule=await tx.solanaAlertRule.findFirst({where:{id:String(req.params.id),userId:req.user!.id}});check(rule,404,'Alert rule not found.');if(enabled){check(providerStatus().alertsEnabled,503,'Alerts are disabled.');check(!(await tx.user.findUniqueOrThrow({where:{id:req.user!.id}})).emergencyStop,409,'Clear emergency stop first.');if(rule.delivery==='BOTH'){const channel=await tx.personalAgentChannel.findUnique({where:{userId:req.user!.id}});check(channel?.enabled&&channel.ownerId,409,'Pair WhatsApp before enabling this rule.');}}else await cancelRuleDelivery(tx,req.user!.id,rule.id);await tx.solanaAlertRule.update({where:{id:rule.id},data:{enabled}});});res.json({ok:true});
 });
 solanaAlertsRouter.post('/alerts/:id/delete',async(req,res)=>{await transaction(async tx=>{await lockUser(tx,req.user!.id);await cancelRuleDelivery(tx,req.user!.id,String(req.params.id));await tx.solanaAlertRule.deleteMany({where:{id:String(req.params.id),userId:req.user!.id}});});res.json({ok:true});});
 solanaAlertsRouter.post('/alerts/check',rateLimit({windowMs:60000,limit:2,keyGenerator:rateLimitKey,standardHeaders:'draft-8',legacyHeaders:false}),async(req,res)=>{await tickSolanaAlerts(req.user!.id);res.json({ok:true});});

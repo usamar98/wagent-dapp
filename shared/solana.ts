@@ -15,6 +15,6 @@ export type SolanaToken = {
   mint: string; pairAddress: string; name: string; symbol: string; dex: string;
   priceUsd: number | null; change24h: number | null; volume24h: number | null;
   liquidityUsd: number | null; marketCap: number | null; pairCreatedAt: number | null;
-  screenerUrl: string; toolsUrl: string;
+  screenerUrl: string;
 };
 export type TokenFeed = { tokens: SolanaToken[]; fetchedAt: string; stale: boolean; source: 'DEX Screener'; coverage: string };

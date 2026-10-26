@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 const mint='So11111111111111111111111111111111111111112';
-const token={mint,pairAddress:mint,name:'Browser fixture token',symbol:'FIXTURE',dex:'fixture',priceUsd:1,change24h:2,volume24h:3000,liquidityUsd:20000,marketCap:null,pairCreatedAt:Date.now()-3600000,screenerUrl:`https://dexscreener.com/solana/${mint}`,toolsUrl:`https://www.dextools.io/app/en/solana/pair-explorer/${mint}`};
+const token={mint,pairAddress:mint,name:'Browser fixture token',symbol:'FIXTURE',dex:'fixture',priceUsd:1,change24h:2,volume24h:3000,liquidityUsd:20000,marketCap:null,pairCreatedAt:Date.now()-3600000,screenerUrl:`https://dexscreener.com/solana/${mint}`};
 const feed={tokens:[token],source:'DEX Screener',fetchedAt:new Date().toISOString(),stale:false,coverage:'Browser-only fixture'};
 
 test('Solana discovery, protected trading, responsive navigation and contained tables',async({page})=>{
@@ -8,7 +8,7 @@ test('Solana discovery, protected trading, responsive navigation and contained t
   await page.route('**/api/bootstrap',route=>route.fulfill({json:{user:null,demo:false}}));
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto('/');await expect(page.getByRole('heading',{name:'Your Solana edge. One WhatsApp away.'})).toBeVisible();
-  await expect(page.getByRole('link',{name:'Open FIXTURE on DEXTools'})).toHaveAttribute('href',token.toolsUrl);
+  await expect(page.getByRole('link',{name:'Open FIXTURE on DEX Screener'})).toHaveAttribute('href',token.screenerUrl);
   await page.getByRole('link',{name:'Buy & sell',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Your agent starts here.'})).toBeVisible();
   await page.getByRole('link',{name:'Token explorer',exact:true}).click();

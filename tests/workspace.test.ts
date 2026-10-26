@@ -67,7 +67,6 @@ describe('Solana discovery and private watchlists',()=>{
     const pair={chainId:'solana',dexId:'fixture',pairAddress:solMint,baseToken:{address:jupMint,name:'Fixture token',symbol:'TEST'},priceUsd:'0.001',liquidity:{usd:20000},pairCreatedAt:Date.now()-3600000};
     const normalized=normalizePairs([{...pair,chainId:'ethereum'},pair,{...pair,liquidity:{usd:50000}},{...pair,baseToken:{...pair.baseToken,address:'not-a-mint'}}]);
     expect(normalized).toHaveLength(1);expect(normalized[0]).toMatchObject({mint:jupMint,liquidityUsd:50000,priceUsd:.001,marketCap:null,volume24h:null});
-    expect(normalized[0].toolsUrl).toBe(`https://www.dextools.io/app/en/solana/pair-explorer/${solMint}`);
     expect(normalizePairs([pair],[solMint])).toHaveLength(0);
   });
   it('uses a bounded cached public API and never treats token profiles as a complete launch feed',async()=>{

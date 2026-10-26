@@ -14,7 +14,7 @@ BEGIN
     'ConsentRecord', 'Instance', 'Execution', 'Signal', 'PaperTrade', 'Position',
     'Notification', 'Moderation', 'Report', 'Setting', 'TradingWorkspace',
     'PersonalAgentChannel', 'AgentCommand', 'TradeIntent', 'BrokerAuthorization',
-    'BrokerOAuthState','SolanaWallet','SolanaWalletChallenge','SolanaSwap','SolanaAlertRule','SolanaAlertEvent'
+    'BrokerOAuthState','SolanaWallet','SolanaWalletChallenge','SolanaSwap','SolanaAlertRule','SolanaAlertEvent','SolanaTokenDiscovery'
   ] LOOP
     IF to_regclass(format('public.%I', app_table)) IS NULL THEN
       RAISE EXCEPTION 'Missing Wagent Ai table %. Apply SQL migrations first.', app_table;

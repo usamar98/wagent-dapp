@@ -11,6 +11,7 @@ import { env } from './env.js';
 import { rateLimitKey } from './rate-limit.js';
 import { SOL_MINT, addressSchema, providerStatus, atomicAmount, humanAmount, tokenMetadata, jupiterOrder, jupiterExecute, signatureStatus, finalizedBlockHeight } from './solana-providers.js';
 import type { ModelRows } from './database/schema.js';
+import { registerProductionWebsite } from './website-runtime.js';
 
 type Swap=ModelRows['SolanaSwap'];
 const unresolved=['EXECUTING','UNKNOWN'];
@@ -46,7 +47,7 @@ async function liveUser(tx:Tx,req:Request){
 }
 async function noUnresolved(tx:Tx,userId:string){check(!await tx.solanaSwap.findFirst({where:{userId,status:{in:unresolved}}}),409,'A previous swap still needs confirmation. Check its status before creating another order.');}
 export const solanaSwapsRouter=Router();
-solanaSwapsRouter.get('/capabilities',(_req,res)=>res.json(providerStatus()));
+solanaSwapsRouter.get('/capabilities',async(_req,res)=>{await registerProductionWebsite();res.json(providerStatus());});
 solanaSwapsRouter.use(auth);
 solanaSwapsRouter.use(rateLimit({windowMs:60000,limit:60,keyGenerator:rateLimitKey,standardHeaders:'draft-8',legacyHeaders:false}));
 solanaSwapsRouter.post('/wallet/challenge',async(req,res)=>{

@@ -5,7 +5,7 @@ import { isSolanaAddress } from '../shared/solana.js';
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const addressSchema = z.string().refine(isSolanaAddress, 'Enter a valid Solana mint or wallet address.');
 export function providerStatus() {
-  return { jupiter:!!process.env.JUPITER_API_KEY, dextools:!!process.env.DEXTOOLS_API_KEY, swapsEnabled:process.env.SOLANA_SWAPS_ENABLED==='true' && !!process.env.JUPITER_API_KEY, alertsEnabled:process.env.SOLANA_ALERTS_ENABLED!=='false' };
+  return { jupiter:!!process.env.JUPITER_API_KEY, discovery:'DEX Screener', swapsEnabled:process.env.SOLANA_SWAPS_ENABLED==='true' && !!process.env.JUPITER_API_KEY, alertsEnabled:process.env.SOLANA_ALERTS_ENABLED!=='false' };
 }
 export async function fetchJson(url: string, options: RequestInit = {}, service = 'Provider', timeout = 12000): Promise<any> {
   try {
@@ -50,33 +50,6 @@ export async function jupiterOrder(inputMint:string,outputMint:string,amount:str
 }
 export async function jupiterExecute(signedTransaction:string,requestId:string,lastValidBlockHeight?:string) {
   return fetchJson('https://api.jup.ag/swap/v2/execute',{method:'POST',headers:{...jupiterHeaders(),'Content-Type':'application/json'},body:JSON.stringify({signedTransaction,requestId,...(lastValidBlockHeight?{lastValidBlockHeight}:{})})},'Jupiter execution',25000);
-}
-const toolsToken=z.object({address:addressSchema,symbol:z.string().max(80),name:z.string().max(200)});
-export const toolsPoolSchema=z.object({address:addressSchema,creationTime:z.string().datetime({offset:true}),mainToken:toolsToken,sideToken:toolsToken,liquidityUsd:z.number().finite().nonnegative(),exchange:z.object({name:z.string().max(80).optional()}).passthrough().optional()});
-export type ToolsPool=z.infer<typeof toolsPoolSchema>;
-async function toolsGet(path:string) {
-  check(process.env.DEXTOOLS_API_KEY,503,'Add DEXTOOLS_API_KEY to enable DEXTools data and new-pool alerts.');
-  const raw=await fetchJson(`https://public-api.dextools.io/v3${path}`,{headers:{'X-API-Key':process.env.DEXTOOLS_API_KEY,Accept:'application/json'}},'DEXTools');
-  // v3's OpenAPI describes bare data; some gateway plans wrap it in statusCode/data.
-  if(raw?.statusCode!==undefined){check(raw.statusCode===200&&raw.data!==undefined,502,'DEXTools returned an unsupported response. Check your key and API plan.');return raw.data;}
-  return raw;
-}
-export async function newToolsPools(from:Date,to:Date) {
-  const pools:ToolsPool[]=[];let complete=true;
-  for(let page=0;page<4;page++){
-    const params=new URLSearchParams({sort:'creationTime',order:'desc',from:from.toISOString(),to:to.toISOString(),page:String(page),pageSize:'50'});
-    const raw=await toolsGet(`/pools/solana?${params}`);
-    const parsed=z.object({results:z.array(toolsPoolSchema).max(100),totalPages:z.number().int().nonnegative()}).safeParse(raw);
-    check(parsed.success,502,'DEXTools new-pool data did not match the supported format.');
-    pools.push(...parsed.data.results);if(page+1>=parsed.data.totalPages)break;if(page===3)complete=false;
-  }
-  return {pools,complete};
-}
-export async function toolsTokenPrice(mint:string) {
-  const raw=await toolsGet(`/tokens/solana/${mint}/metrics`);
-  const parsed=z.object({price:z.union([z.number(),z.string()])}).safeParse(raw);
-  const price=parsed.success?Number(parsed.data.price):NaN;
-  check(Number.isFinite(price)&&price>0,502,'DEXTools token price is unavailable.');return price;
 }
 async function rpc(method:string,params:unknown[]) {
   const url=process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';

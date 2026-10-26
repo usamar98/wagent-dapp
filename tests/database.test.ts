@@ -5,6 +5,7 @@ import { createDatabase, type Database } from '../server/database/client.js';
 import { databaseSchema } from '../server/database/schema.js';
 import { migrateEmbedded } from '../scripts/database.js';
 import { defaultConfig } from '../shared/config.js';
+import { readFileSync } from 'node:fs';
 
 describe('direct PostgreSQL access', () => {
   let pg: PGlite, socket: PGLiteSocketServer, db: Database;
@@ -64,6 +65,23 @@ describe('direct PostgreSQL access', () => {
 });
 
 describe('existing database adoption', () => {
+  it('migrates legacy alerts without losing events, pairings, or encrypted credentials',async()=>{
+    const pg=await PGlite.create();
+    try{
+      await pg.exec(readFileSync('supabase/migrations/20261023200507_wagent_schema.sql','utf8'));
+      await pg.exec(readFileSync('supabase/migrations/20261026120303_solana_swaps_alerts.sql','utf8'));
+      await pg.exec(`INSERT INTO "User" (id,name) VALUES ('migration-owner','Migration fixture');
+        INSERT INTO "PersonalAgentChannel" (id,"userId",label,"encryptedToken","tokenFingerprint","ownerId","consentAt","updatedAt") VALUES ('migration-channel','migration-owner','Migration fixture','preserved-ciphertext','fixture-fingerprint','user:fixture',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+        INSERT INTO "SolanaAlertRule" (id,"userId",name,kind,source,delivery) VALUES ('discovery-rule','migration-owner','Legacy pools','NEW_POOL','DEXTOOLS','IN_APP');
+        INSERT INTO "SolanaAlertRule" (id,"userId",name,kind,source,delivery,mint,threshold,"lastMatched") VALUES ('price-rule','migration-owner','Legacy price','PRICE_ABOVE','DEXTOOLS','IN_APP','So11111111111111111111111111111111111111112',10,true);
+        INSERT INTO "SolanaAlertEvent" (id,"userId","ruleId","dedupeKey",title,body,snapshot) VALUES ('preserved-event','migration-owner','discovery-rule','old-pool','Old alert','Preserved history','{}');`);
+      await pg.exec(readFileSync('supabase/migrations/20261026151345_screener_discovery_channel_origin.sql','utf8'));
+      expect((await pg.query(`SELECT kind,source FROM "SolanaAlertRule" WHERE id='discovery-rule'`)).rows).toEqual([{kind:'NEW_DISCOVERY',source:'DEX_SCREENER'}]);
+      expect((await pg.query(`SELECT source,"lastMatched" FROM "SolanaAlertRule" WHERE id='price-rule'`)).rows).toEqual([{source:'DEX_SCREENER',lastMatched:true}]);
+      expect((await pg.query(`SELECT "ownerId","encryptedToken","appUrl" FROM "PersonalAgentChannel"`)).rows).toEqual([{ownerId:'user:fixture',encryptedToken:'preserved-ciphertext',appUrl:null}]);
+      expect((await pg.query('SELECT count(*)::int AS count FROM "SolanaAlertEvent"')).rows).toEqual([{count:1}]);
+    }finally{await pg.close();}
+  });
   it('retains account records and archives legacy migration metadata without recreating them', async () => {
     const pg=await PGlite.create();
     try {
@@ -74,7 +92,7 @@ describe('existing database adoption', () => {
       expect((await pg.query('SELECT id,name FROM "User"')).rows).toEqual([{id:'existing-owner',name:'Existing owner'}]);
       expect((await pg.query('SELECT id,migration_name FROM wagent_internal.previous_migrations')).rows).toEqual([{id:'history',migration_name:'historical_migration'}]);
       expect((await pg.query("SELECT to_regclass('public.\"_prisma_migrations\"') AS old_table")).rows).toEqual([{old_table:null}]);
-      expect((await pg.query('SELECT count(*)::int AS count FROM supabase_migrations.schema_migrations')).rows).toEqual([{count:2}]);
+      expect((await pg.query('SELECT count(*)::int AS count FROM supabase_migrations.schema_migrations')).rows).toEqual([{count:3}]);
     } finally {await pg.close();}
   });
 });

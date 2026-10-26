@@ -1,9 +1,10 @@
 // Application records stored in Supabase PostgreSQL. Keep in sync with SQL migrations.
 export interface ModelRows {
+  SolanaTokenDiscovery: { mint: string; firstSeenAt: Date; lastSeenAt: Date };
   SolanaWallet: { userId: string; address: string; verifiedAt: Date };
   SolanaWalletChallenge: { id: string; userId: string; sessionId: string; address: string; message: string; expiresAt: Date };
   SolanaSwap: { id: string; userId: string; clientRequestId: string; providerRequestId: string; walletAddress: string; inputMint: string; outputMint: string; inputAmount: string; outputAmount: string; unsignedTransaction: string; quote: any; status: string; signature: string | null; error: string | null; expiresAt: Date; createdAt: Date; updatedAt: Date };
-  SolanaAlertRule: { id: string; userId: string; name: string; kind: string; source: string; mint: string | null; threshold: number | null; delivery: string; minLiquidityUsd: number; maxPoolAgeMinutes: number; cooldownMinutes: number; enabled: boolean; lastMatched: boolean; lastObservedAt: Date | null; lastCheckedAt: Date | null; lastTriggeredAt: Date | null; lastError: string | null; createdAt: Date; updatedAt: Date };
+  SolanaAlertRule: { id: string; userId: string; name: string; kind: string; source: string; mint: string | null; threshold: number | null; delivery: string; minLiquidityUsd: number; maxDiscoveryAgeMinutes: number; cooldownMinutes: number; enabled: boolean; lastMatched: boolean; discoveryBaselineAt: Date | null; lastObservedAt: Date | null; lastCheckedAt: Date | null; lastTriggeredAt: Date | null; lastError: string | null; createdAt: Date; updatedAt: Date };
   SolanaAlertEvent: { id: string; userId: string; ruleId: string; dedupeKey: string; title: string; body: string; snapshot: any; createdAt: Date };
   User: {
     id: string;
@@ -234,6 +235,7 @@ export interface ModelRows {
     updatedAt: Date;
   };
   PersonalAgentChannel: {
+    appUrl: string | null;
     id: string;
     userId: string;
     label: string;
@@ -304,10 +306,11 @@ export interface ModelRows {
 export type ModelName = keyof ModelRows;
 
 export const databaseSchema = {
+  SolanaTokenDiscovery: { columns:['mint','firstSeenAt','lastSeenAt'],primaryKey:['mint'],unique:[['mint']],generatedId:false,updatedAt:[],json:[],relations:{} },
   SolanaWallet: { columns:['userId','address','verifiedAt'],primaryKey:['userId'],unique:[['userId'],['address']],generatedId:false,updatedAt:[],json:[],relations:{} },
   SolanaWalletChallenge: { columns:['id','userId','sessionId','address','message','expiresAt'],primaryKey:['id'],unique:[['id'],['userId']],generatedId:true,updatedAt:[],json:[],relations:{} },
   SolanaSwap: { columns:['id','userId','clientRequestId','providerRequestId','walletAddress','inputMint','outputMint','inputAmount','outputAmount','unsignedTransaction','quote','status','signature','error','expiresAt','createdAt','updatedAt'],primaryKey:['id'],unique:[['id'],['providerRequestId'],['userId','clientRequestId']],generatedId:true,updatedAt:['updatedAt'],json:['quote'],relations:{} },
-  SolanaAlertRule: { columns:['id','userId','name','kind','source','mint','threshold','delivery','minLiquidityUsd','maxPoolAgeMinutes','cooldownMinutes','enabled','lastMatched','lastObservedAt','lastCheckedAt','lastTriggeredAt','lastError','createdAt','updatedAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:['updatedAt'],json:[],relations:{} },
+  SolanaAlertRule: { columns:['id','userId','name','kind','source','mint','threshold','delivery','minLiquidityUsd','maxDiscoveryAgeMinutes','cooldownMinutes','enabled','lastMatched','discoveryBaselineAt','lastObservedAt','lastCheckedAt','lastTriggeredAt','lastError','createdAt','updatedAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:['updatedAt'],json:[],relations:{} },
   SolanaAlertEvent: { columns:['id','userId','ruleId','dedupeKey','title','body','snapshot','createdAt'],primaryKey:['id'],unique:[['id'],['ruleId','dedupeKey']],generatedId:true,updatedAt:[],json:['snapshot'],relations:{} },
   "User": {
     "columns": [
@@ -1216,6 +1219,7 @@ export const databaseSchema = {
   },
   "PersonalAgentChannel": {
     "columns": [
+      "appUrl",
       "id",
       "userId",
       "label",

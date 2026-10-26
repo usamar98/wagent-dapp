@@ -10,9 +10,10 @@ import { riskBudget, simulatedFeed } from '../shared/strategies.js';
 import { env } from './env.js';
 import { isSolanaAddress } from '../shared/solana.js';
 import { providerStatus } from './solana-providers.js';
+import { channelWebsiteRuntime, websiteOrigin, type WebsiteRuntime } from './website-runtime.js';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-const help = 'WAGENT AI · SOLANA · Try Status; Stop all; Buy 0.1 SOL of <mint>; Sell 100 of <mint>. Buy/sell opens a website review. You must sign each swap in your Solana wallet. Create price, liquidity, or new-pool alert rules on the website. Earlier paper balances are simulations.';
+const help = 'WAGENT AI · SOLANA · Try Status; Stop all; Buy 0.1 SOL of <mint>; Sell 100 of <mint>. Buy/sell opens a website review. You must sign each swap in your Solana wallet. Create price, liquidity, or token discovery alert rules on the website. Earlier paper balances are simulations.';
 
 export async function getWorkspace(userId: string) {
   return transaction(async tx => {
@@ -46,6 +47,13 @@ async function activeRuntime(tx: Tx, userId: string) {
 }
 
 export async function executeCommand(userId: string, text: string, source: 'WEB' | 'WHATSAPP', externalId: string, now = new Date(), channelContext?: { id: string; leaseToken: string; ownerId: string }) {
+  let website:WebsiteRuntime={appUrl:websiteOrigin(env.appUrl),swapsEnabled:providerStatus().swapsEnabled};
+  if(source==='WHATSAPP'){
+    check(channelContext,403,'A verified personal agent connection is required.');
+    const channel=await db.personalAgentChannel.findFirst({where:{id:channelContext.id,userId,enabled:true,leaseToken:channelContext.leaseToken,ownerId:channelContext.ownerId}});
+    check(channel?.leaseUntil&&channel.leaseUntil>new Date(),403,'This WhatsApp connection was disconnected or changed.');
+    website=await channelWebsiteRuntime(channel.appUrl);
+  }
   return transaction(async tx => {
     await lockUser(tx, userId);
     const user = await tx.user.findUnique({ where: { id: userId } });
@@ -54,6 +62,7 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
       check(channelContext, 403, 'A verified personal agent connection is required.');
       const channel = await tx.personalAgentChannel.findFirst({ where: { id: channelContext.id, userId, enabled: true, leaseToken: channelContext.leaseToken, ownerId: channelContext.ownerId } });
       check(channel && channel.leaseUntil && channel.leaseUntil > new Date(), 403, 'This WhatsApp connection was disconnected or changed.');
+      check(!channel.appUrl||websiteOrigin(channel.appUrl)===website.appUrl,409,'The connected website changed. Check messages again.');
     }
     const existing = await tx.agentCommand.findUnique({ where: { userId_source_externalId: { userId, source, externalId } } });
     if (existing) return { command: existing, duplicate: true };
@@ -65,14 +74,14 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
         const side=tradeLink[1].toUpperCase(),amount=tradeLink[2],mint=tradeLink[4];
         check(isSolanaAddress(mint)&&Number(amount)>0,400,'Use a valid mint and positive amount.');
         check(side==='BUY'?tradeLink[3].toLowerCase()==='sol of':tradeLink[3].toLowerCase()==='of',400,'Use Buy <SOL amount> SOL of <mint>, or Sell <token amount> of <mint>.');
-        const link=new URL('/trade',env.appUrl);link.search=new URLSearchParams({side,mint,amount}).toString();
-        reply=`SOLANA SWAP REVIEW · ${side==='BUY'?`Spend ${amount} SOL`:`Sell ${amount} tokens`}\nMint: ${mint}\n${link}\nSign in, review a fresh Jupiter quote, and approve it in your linked Solana wallet. This message does not submit an order.${providerStatus().swapsEnabled?'':' Jupiter trading setup is still required.'}`;
+        const link=new URL('/trade',website.appUrl);link.search=new URLSearchParams({side,mint,amount}).toString();
+        reply=`SOLANA SWAP REVIEW · ${side==='BUY'?`Spend ${amount} SOL`:`Sell ${amount} tokens`}\nMint: ${mint}\n${link}\nSign in, review a fresh Jupiter quote, and approve it in your linked Solana wallet. This message does not submit an order.${website.swapsEnabled===false?' Jupiter trading setup is still required.':website.swapsEnabled===null?' Website trading status could not be checked; open the link to verify.':''}`;
         const saved=await tx.agentCommand.create({data:{userId,source,externalId,text,reply,status:'COMPLETED',channelId:channelContext?.id,recipientId:channelContext?.ownerId,deliveryStatus:source==='WHATSAPP'?'PENDING':'NOT_REQUIRED',createdAt:now}});return {command:saved,duplicate:false};
       }
       const command = parseCommand(text);
       if (command.kind === 'invalid') throw new AppError(400, command.reason);
       if (!env.demo && (command.kind === 'trade' || command.kind === 'confirm' || command.kind === 'start')) throw new AppError(409, 'Use Buy <amount> SOL of <mint> or Sell <amount> of <mint> for a website review link. Each real swap needs a Solana wallet signature on the website. Configure automatic alerts in Token alerts.');
-      if (command.kind === 'help') reply = help;
+      if (command.kind === 'help') reply = `${help}\nManage your alerts: ${new URL('/alerts',website.appUrl)}`;
       else if (command.kind === 'emergency') {
         await tx.user.update({ where: { id: userId }, data: { emergencyStop: true } });
         await tx.instance.updateMany({ where: { userId }, data: { status: 'STOPPED' } });
@@ -84,13 +93,13 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
         const wallet=await tx.solanaWallet.findUnique({where:{userId}});
         if(command.kind==='status'){
           const enabled=await tx.solanaAlertRule.count({where:{userId,enabled:true}});
-          reply=`WAGENT AI · SOLANA\nTrading: ${providerStatus().swapsEnabled?'Jupiter ready, wallet approval required':'Jupiter setup required'}\nSolana wallet: ${wallet?.address||'not linked'}\nActive alert rules: ${enabled}\nEmergency stop: ${user.emergencyStop?'active':'off'}\nManage alerts: ${new URL('/alerts',env.appUrl)}\nEach real swap requires a website review and wallet signature.`;
-        }else if(command.kind==='portfolio')reply=`SOLANA WALLET · ${wallet?.address||'Link a Solana wallet in Buy & sell first.'}\nOpen your wallet to view current holdings. Wagent Ai does not substitute paper balances for on-chain funds.\n${new URL('/trade',env.appUrl)}`;
+          reply=`WAGENT AI · SOLANA\nTrading: ${website.swapsEnabled===true?'Jupiter ready, wallet approval required':website.swapsEnabled===false?'Jupiter setup required':'Website status temporarily unavailable'}\nSolana wallet: ${wallet?.address||'not linked'}\nActive alert rules: ${enabled}\nEmergency stop: ${user.emergencyStop?'active':'off'}\nManage alerts: ${new URL('/alerts',website.appUrl)}\nEach real swap requires a website review and wallet signature.`;
+        }else if(command.kind==='portfolio')reply=`SOLANA WALLET · ${wallet?.address||'Link a Solana wallet in Buy & sell first.'}\nOpen your wallet to view current holdings. Wagent Ai does not substitute paper balances for on-chain funds.\n${new URL('/trade',website.appUrl)}`;
         else{
           await tx.solanaAlertRule.updateMany({where:{userId,enabled:true},data:{enabled:false}});
           await tx.agentCommand.updateMany({where:{userId,source:'ALERT',deliveryStatus:{in:['PENDING','RETRY']}},data:{deliveryStatus:'CANCELLED'}});
           await tx.solanaSwap.updateMany({where:{userId,status:'QUOTED'},data:{status:'CANCELLED'}});
-          reply=`WORKSPACE PAUSED · Alert rules paused and unsigned swap quotes cancelled. Enable individual rules on the website to resume. Already-submitted transactions cannot be recalled.\n${new URL('/alerts',env.appUrl)}`;
+          reply=`WORKSPACE PAUSED · Alert rules paused and unsigned swap quotes cancelled. Enable individual rules on the website to resume. Already-submitted transactions cannot be recalled.\n${new URL('/alerts',website.appUrl)}`;
         }
       } else {
         const { workspace, instance, config } = await activeRuntime(tx, userId);

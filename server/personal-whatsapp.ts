@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { db, transaction, lockUser } from './db.js';
 import { auth, check, encrypt, decrypt, hash, token, AppError } from './security.js';
 import { executeCommand } from './trading.js';
+import { env } from './env.js';
+import { websiteOrigin } from './website-runtime.js';
 
 const base = 'https://api.whatsapp.com/agent/v1';
 const senderId = z.string().regex(/^user:[A-Za-z0-9._-]{1,160}$/);
@@ -135,7 +137,7 @@ personalWhatsAppRouter.post('/', async (req, res) => {
   const code = randomBytes(6).toString('hex').toUpperCase();
   await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
-    const data = { label: input.label, encryptedToken: encrypt(input.apiKey), tokenFingerprint: hash(input.apiKey), ownerId: null, agentId: null, pairingHash: hash(code), pairingExpiresAt: new Date(Date.now() + 10 * 60000), enabled: true, offset: '0', leaseToken: null, leaseUntil: null, nextPollAt: new Date(), lastError: null, lastPollAt: null, lastMessageAt: null, createdAt: new Date(), consentAt: new Date() };
+    const data = { appUrl:websiteOrigin(env.appUrl),label: input.label, encryptedToken: encrypt(input.apiKey), tokenFingerprint: hash(input.apiKey), ownerId: null, agentId: null, pairingHash: hash(code), pairingExpiresAt: new Date(Date.now() + 10 * 60000), enabled: true, offset: '0', leaseToken: null, leaseUntil: null, nextPollAt: new Date(), lastError: null, lastPollAt: null, lastMessageAt: null, createdAt: new Date(), consentAt: new Date() };
     const previous = await tx.personalAgentChannel.findUnique({ where: { userId } });
     if (previous) await tx.agentCommand.updateMany({ where: { channelId: previous.id, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'CANCELLED' } });
     await tx.personalAgentChannel.upsert({ where: { userId }, create: { userId, ...data }, update: data });

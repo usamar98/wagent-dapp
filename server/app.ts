@@ -19,6 +19,7 @@ import { solanaRouter } from './solana.js';
 import { solanaSwapsRouter } from './solana-swaps.js';
 import { solanaAlertsRouter } from './solana-alerts.js';
 import { providerStatus } from './solana-providers.js';
+import { registerProductionWebsite } from './website-runtime.js';
 
 export const app=express();
 app.disable('x-powered-by');
@@ -43,6 +44,7 @@ app.post('/api/webhooks/whatsapp',express.raw({type:'application/json',limit:'25
 });
 app.use(express.json({limit:'64kb'}),cookieParser(),session);
 app.use('/api',csrf);
+app.use('/api',async(_req,_res,next)=>{await registerProductionWebsite();next();});
 // Preserve historical records while keeping the public release limited to setup and research.
 app.use(['/api/marketplace','/api/checkout','/api/creator/connect','/api/versions/:id/submit'],(_req,_res,next)=>{
   if (!env.demo) return next(new AppError(409,'The agent marketplace and purchases are coming soon. Create a private Solana agent instead.'));

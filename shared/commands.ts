@@ -25,5 +25,5 @@ export function parseCommand(input: string): ParsedCommand {
     if (!isSolanaAsset(symbol)) return { kind: 'invalid', reason: 'This workspace supports Solana tokens only. Use a supported Solana asset or its exact mint address.' };
     return { kind: 'trade', side: trade[1].toUpperCase() as 'BUY' | 'SELL', amountCents, symbol };
   }
-  return { kind: 'invalid', reason: 'Try “Help”, “Status”, or “Stop all”. Live Solana buy/sell and automated token alerts are coming soon. Paper-fixture orders use explicit USD amounts and never move funds.' };
+  return { kind: 'invalid', reason: 'Try “Help”, “Status”, or “Stop all”. For a swap review, use “Buy 0.1 SOL of <mint>” or “Sell 100 of <mint>”. Approve each real swap in your Solana wallet on the website. Configure token discovery, price, and liquidity alerts on the website.' };
 }

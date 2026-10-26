@@ -33,7 +33,6 @@ export function normalizePairs(input: unknown, mints?: string[]): SolanaToken[] 
       liquidityUsd: p.liquidity?.usd ?? null, marketCap: p.marketCap ?? null,
       pairCreatedAt: p.pairCreatedAt && p.pairCreatedAt <= Date.now() ? p.pairCreatedAt : null,
       screenerUrl: `https://dexscreener.com/solana/${p.pairAddress}`,
-      toolsUrl: `https://www.dextools.io/app/en/solana/pair-explorer/${p.pairAddress}`,
     };
     const previous = selected.get(mint);
     if (!previous || (item.liquidityUsd ?? -1) > (previous.liquidityUsd ?? -1)) selected.set(mint, item);
