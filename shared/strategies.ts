@@ -38,7 +38,7 @@ export function decide(config: AgentConfig, data: MarketData, now = new Date()):
 export function simulatedFeed(symbol: string, now = new Date(), timeframe: AgentConfig['timeframe'] = '1h'): MarketData {
   const step=timeframeMs[timeframe], end=Math.floor(now.getTime()/step)*step;
   const seed=[...symbol].reduce((a,c)=>a+c.charCodeAt(0),0);
-  const base=symbol.startsWith('BTC')?65000:symbol.startsWith('ETH')?3200:symbol.includes('EUR')?1.08:symbol.startsWith('SOL')?145:190;
+  const base=symbol.startsWith('SOL')?145:symbol.startsWith('BONK')?0.00002:symbol.startsWith('JUP')?0.8:1.5;
   const candles=Array.from({length:80},(_,i)=>{const n=end/step-79+i; return {timestamp:new Date(end-(79-i)*step).toISOString(), close:Number((base*(1+0.026*Math.sin((n+seed)/7)+0.008*Math.sin((n+seed)/2.3))).toFixed(6))};});
   return {symbol, source:'Wagent Ai deterministic simulated feed v1',simulated:true,candles};
 }

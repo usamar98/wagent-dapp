@@ -4,7 +4,7 @@ import { db } from './db.js';
 import { tickPersonalAgents } from './personal-whatsapp.js';
 let running=true;
 for(const sig of ['SIGINT','SIGTERM'] as const) process.on(sig,()=>{running=false;});
-console.log('Wagent Ai worker started. Personal WhatsApp agents and paper execution. Live orders are unavailable.');
+console.log('Wagent Ai worker started. Personal WhatsApp pairing and replies. Live Solana trading and automated alerts are coming soon.');
 async function heartbeat(){await db.setting.upsert({where:{key:'workerHeartbeat'},create:{key:'workerHeartbeat',value:String(Date.now())},update:{value:String(Date.now())}});}
 const heartbeatTimer=setInterval(()=>void heartbeat().catch(()=>{}),10000);
 await heartbeat();

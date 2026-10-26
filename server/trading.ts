@@ -10,14 +10,13 @@ import { riskBudget, simulatedFeed } from '../shared/strategies.js';
 import { env } from './env.js';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-const help = 'PAPER MODE · Try: Buy $100 of BTC; Sell $25 of BTC; Show portfolio; Status; Start agent; Pause agent; Stop all. Orders create a preview first. Reply CONFIRM followed by its eight-character code within two minutes. Prices and fills are simulated. No real funds move.';
+const help = 'WAGENT AI · SOLANA · Create your agent on the website and select it in Connections. Try Status; Show portfolio; Pause agent; Stop all. Live buy/sell, new-pool alerts, and automated price/liquidity alerts are coming soon. Earlier paper balances are simulations, not wallet balances. No funds move.';
 
 export async function getWorkspace(userId: string) {
   return transaction(async tx => {
   await lockUser(tx,userId);
   await tx.tradeIntent.updateMany({ where: { userId, status: 'PENDING', expiresAt: { lte: new Date() } }, data: { status: 'EXPIRED' } });
   const channel = await tx.personalAgentChannel.findUnique({ where: { userId } });
-  const broker = await tx.brokerAuthorization.findUnique({ where: { userId } });
   const [workspace, versions, instances, commands, intents, worker] = await Promise.all([
     tx.tradingWorkspace.upsert({ where: { userId }, create: { userId }, update: {} }),
     tx.agentVersion.findMany({ where: { OR: [{ agent: { creatorId: userId } }, { entitlements: { some: { buyerId: userId, status: 'ACTIVE', ...(env.demo ? {} : { environment: { not: 'DEMO' } }) } } }] }, include: { agent: { select: { id: true, name: true, creatorId: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
@@ -27,10 +26,9 @@ export async function getWorkspace(userId: string) {
     tx.setting.findUnique({ where: { key: 'workerHeartbeat' } }),
   ]);
   return {
-    workspace, versions, instances, commands: commands.reverse(), intents,
+    workspace, versions: versions.filter(v => configSchema.safeParse(v.config).success), instances, commands: commands.reverse(), intents,
     channel: channel ? { label:channel.label, paired:!!channel.ownerId, enabled:channel.enabled, pairingExpiresAt:channel.pairingExpiresAt, lastPollAt:channel.lastPollAt, lastMessageAt:channel.lastMessageAt, lastError:channel.lastError } : null,
-    broker: broker ? {connectedAt:broker.connectedAt,scope:broker.scope} : null, workerOnline: !!worker && Date.now() - Number(worker.value) < 30000,
-    coinbaseConfigured: !!process.env.COINBASE_CLIENT_ID && !!process.env.COINBASE_CLIENT_SECRET,
+    network: 'solana', dataProvider: 'DEX Screener', workerOnline: !!worker && Date.now() - Number(worker.value) < 30000,
     liveTrading: false,
   };
   });
@@ -61,6 +59,7 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
     try {
       const command = parseCommand(text);
       if (command.kind === 'invalid') throw new AppError(400, command.reason);
+      if (!env.demo && (command.kind === 'trade' || command.kind === 'confirm' || command.kind === 'start')) throw new AppError(409, 'Solana buy/sell and automated token monitoring are coming soon. Your saved agent and WhatsApp pairing are available now. No order was sent.');
       if (command.kind === 'help') reply = help;
       else if (command.kind === 'emergency') {
         await tx.user.update({ where: { id: userId }, data: { emergencyStop: true } });
@@ -70,7 +69,7 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
       } else {
         const { workspace, instance, config } = await activeRuntime(tx, userId);
         if (command.kind === 'status') reply = `PAPER MODE · ${instance.version.agent.name} v${instance.version.number} is ${instance.status.toLowerCase()}. Cash: ${usd(instance.cashCents)}. ${instance.positions.length} open position(s). Order limit: ${usd(workspace.maxOrderCents)}. Live trading is unavailable.`;
-        else if (command.kind === 'portfolio') reply = `PAPER PORTFOLIO · Cash: ${usd(instance.cashCents)}. ${instance.positions.length ? instance.positions.map(p => `${p.symbol}: ${p.quantity.toFixed(8)}, entry $${p.entryPrice.toFixed(2)}`).join('; ') : 'No open positions.'} Simulated balances, separate from Coinbase.`;
+        else if (command.kind === 'portfolio') reply = `PAPER PORTFOLIO · Cash: ${usd(instance.cashCents)}. ${instance.positions.length ? instance.positions.map(p => `${p.symbol}: ${p.quantity.toFixed(8)}, entry $${p.entryPrice.toFixed(2)}`).join('; ') : 'No open positions.'} Simulated balances, not a Solana wallet balance.`;
         else if (['start', 'pause', 'stop'].includes(command.kind)) {
           if (command.kind === 'start') check(!user.emergencyStop, 409, 'Emergency stop is active. Clear it on the website first.');
           const state = command.kind === 'start' ? 'RUNNING' : command.kind === 'pause' ? 'PAUSED' : 'STOPPED';
@@ -115,7 +114,7 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
           }
         } else if (command.kind === 'trade') {
           check(!user.emergencyStop && instance.status === 'RUNNING', 409, 'Start your selected agent before creating an order.');
-          check(config.market === 'crypto', 409, 'WhatsApp command orders currently support crypto agents only. Stocks and forex remain strategy simulations.');
+          check(config.market === 'crypto', 409, 'Command orders only support Solana agents.');
           check(config.symbols.includes(command.symbol), 400, `${command.symbol} is not in this agent’s allowed assets: ${config.symbols.join(', ')}.`);
           check(command.amountCents <= workspace.maxOrderCents && command.amountCents <= config.positionSize * 100, 400, 'Order exceeds your workspace or agent position-size limit.');
           const feed = simulatedFeed(command.symbol, now, config.timeframe), price = feed.candles.at(-1)!.close;

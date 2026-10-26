@@ -47,8 +47,8 @@ The optional npm run dev:demo command uses an isolated embedded PostgreSQL fixtu
 
 ## Vercel and worker hosting
 
-Set Production DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY as Secret variables. Set APP_URL, DEMO_MODE, and PAYMENT_PROVIDER as configuration values. Retain applicable Coinbase, Stripe, and administrator settings. Keep credentials out of VITE_ variables and use separate Preview configuration. Redeploy after environment changes.
+Set Production DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY as Secret variables. Set APP_URL, DEMO_MODE, and PAYMENT_PROVIDER as configuration values. Retain applicable legacy Stripe and administrator settings. Coinbase credentials are no longer used. Keep credentials out of VITE_ variables and use separate Preview configuration. Redeploy after environment changes.
 
 Vercel serves the website and request-based API. The worker remains a separate persistent process, using the same Supabase connection and encryption key. Use compose.worker.yaml on its host or npm run worker with an explicitly supplied production environment. Vercel deployment does not start the persistent loop.
 
-Verify wallet sign-in, ownership isolation, private agent creation, one confirmed paper order, duplicate-confirmation rejection, emergency stop, and a recent worker heartbeat. Keep private backups and recovery connection files outside Git. This migration does not enable real-money trading.
+Verify wallet sign-in, ownership isolation, private Solana agent creation, watchlist persistence, WhatsApp pairing, Coming soon order rejection, emergency stop, and a recent worker heartbeat. Keep private backups and recovery connection files outside Git. This migration does not enable real-money trading.

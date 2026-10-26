@@ -1,101 +1,52 @@
 # Wagent Ai
 
-A personal WhatsApp command workspace and marketplace for versioned, declarative trading agents. Build or license a crypto strategy, pair your own WhatsApp agent, preview an order, and confirm its simulated fill. React + Vite + TypeScript, CSS Modules, Express, Supabase PostgreSQL with the `pg` driver, and a separate execution worker. Agent purchases are **one-time payments** with a default 10% platform commission. The MVP generates signals and paper trades only.
+A Solana-only agent workspace. Create a private token configuration, pair your personal WhatsApp agent, research Solana pools with DEX Screener, and save a private mint-address watchlist. React, Vite, TypeScript, Express, and Supabase PostgreSQL through pg. Prisma is not used.
 
-## Start locally, no Docker required
+## Available now
 
-Node.js 22.12+ (Node 24 recommended). From this project directory:
+- MetaMask message sign-in for workspace identity. This does not connect a Solana trading wallet.
+- Private agent creation with 1–10 Solana token mints.
+- Agent selection, encrypted personal WhatsApp keys, one-time ownership pairing, manual sync, and background polling.
+- Real Solana token discovery and mint search from DEX Screener, refreshed every 60 seconds.
+- Liquidity filtering, pool age, volume, mint copying, and direct DEX Screener / DEXTools research links.
+- Private account-scoped watchlists stored in Supabase, with up to 30 mints.
+- Activity history, ownership isolation, and emergency stop.
+
+## Coming soon
+
+Live token buying with SOL and selling back to SOL; Solana transaction signing; new-pool, price, volume and liquidity alerts; take-profit and stop-loss; and agent marketplace licensing. These screens do not submit orders or schedule notifications. Production rejects order creation, confirmation and runtime start commands. The background worker only handles personal-agent polling/replies and its heartbeat. Earlier paper records are preserved. Paper execution remains in isolated demo/test fixtures only.
+
+Coinbase OAuth has been removed. Historical broker database tables and encrypted records are retained for recovery and are not accessed by the active integration. Other markets are not offered or accepted in new configurations. Existing incompatible strategies remain stored and are not runnable.
+
+## Run locally
+
+Use Node.js 22.12+ (Node 24 recommended):
 
 ```sh
 npm ci
 npm run setup:env
-# Fill .env.supabase.local with the intended Supabase connection and encryption key.
+# Fill the ignored .env.supabase.local using supabase.env.example.
+# Retain the existing encryption key when using existing data.
 npm run db:migrate:supabase
 npm run dev
 ```
 
-Open **http://localhost:5173**. The default launcher connects directly to Supabase and starts the API (4000), Vite (5173), and a separate worker. It does not create a database or seed sample records. Ctrl+C stops these services. Existing encryption keys must be retained when connecting to an existing database.
+Open http://localhost:5173. The API uses port 4000. The launcher starts the API, Vite, and the worker against Supabase without seeding hosted data. Keep the worker on a persistent host for automatic message polling. A Vercel website deployment alone does not keep that process alive.
 
-An isolated offline fixture remains available with `npm run dev:demo`. It uses embedded PGlite and sample records for demonstration and tests, separate from Supabase. `npm run preview:demo` serves that fixture's built frontend after a successful build. Stop the hosted launcher before using the same ports for a fixture.
+Core environment: DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY, APP_URL, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test. Only DATABASE_URL is used, with verified TLS and the included public Supabase CA. No DIRECT_URL, Prisma account, Coinbase key, shared WhatsApp key, DEX Screener key, DEXTools API key, or AI key is required for the currently available features. Each user supplies their personal agent key in Connections.
 
-## Supabase PostgreSQL
+See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All 29 application tables retain backend-only access. Watchlists use a per-user Setting key; no schema migration or destructive database change is needed for this release.
 
-Supabase is the hosted database. The backend queries its PostgreSQL endpoint using `pg`, parameterized SQL, and an application-specific typed repository. There is no external ORM or generated database client. The wallet login, agent builder, and trading routes continue to use the Express API.
+## Data-source behavior
 
-The selected hosted project is [`wagent-ai`](https://supabase.com/dashboard/project/ogahyykwsezulhblaqvx). Existing application records are preserved. The 29 application tables have RLS enabled and direct browser-role access revoked. SQL migration history uses the standard `supabase_migrations` schema; historical migration metadata is archived privately. See [Supabase setup](docs/SUPABASE.md) for configuration and verification.
+- DEX Screener token profiles are discovery candidates, not a complete feed of all Solana launches.
+- Each token is identified by its case-sensitive mint. Only pairs whose chain is solana are returned. The most liquid indexed pair per base mint is selected.
+- Pool creation time is not token mint age. Symbols and names are not verified identities. Liquidity and listings do not certify safety.
+- Provider failures show an error. A cached result may be returned for up to five minutes, explicitly marked stale with its original fetch time. No fabricated prices replace failed responses.
+- Public upstream calls are cached, coalesced, rate-limited, time-bounded, response-size bounded and restricted to a fixed DEX Screener origin. There is no user-supplied upstream URL.
+- DEXTools research links open its external app. Its paid API is not connected. Data APIs do not authorize Wagent Ai to operate an external trading account or wallet.
 
-After configuring the ignored `.env.supabase.local` from `supabase.env.example`, use:
-
-```sh
-npm run db:migrate:supabase
-npm run db:secure:supabase
-npm run db:check:supabase
-npm run dev:supabase
-```
-
-`npm run dev` starts the website, API, and worker against Supabase. `npm run dev:supabase` starts only the API and website; add `-- --worker` when needed. Both use the ignored `.env.supabase.local`. One `DATABASE_URL` is used for runtime traffic, schema migration, and security checks.
-
-## MetaMask sign-in
-
-Select **Connect MetaMask** in a browser with the MetaMask extension installed. The server issues a five-minute, single-use Sign-In with Ethereum message bound to the configured domain, wallet address, chain and browser. MetaMask signs the message; the server verifies the signature and issues an HttpOnly session. Wallet sign-in requires no API key or blockchain transaction. There are no email/password registration, login or password-reset routes, and no reset-email provider.
-
-The message format follows [ERC-4361](https://eips.ethereum.org/EIPS/eip-4361) and uses [MetaMask personal_sign](https://docs.metamask.io/metamask-connect/evm/guides/sign-data/).
-
-Every connected wallet can buy and create. Wallet account/network changes sign the browser out. A newly connected wallet creates its own account and creator profile.
-
-To enable administrator access, add your **public wallet address** to the server environment and restart:
-
-```env
-ADMIN_WALLET_ADDRESSES=0xYOUR_PUBLIC_WALLET_ADDRESS
-```
-
-Multiple administrator addresses can be separated by commas. Never put a seed phrase or private key in this setting. Administrator permissions are checked against the server allowlist on every request; connecting a wallet does not grant administrative access by itself. Administrators cannot approve their own listings.
-
-### Existing demo profiles and migration
-
-Existing accounts, agents, orders, entitlements, and linked wallets survive the SQL-client migration. The optional demo seed creates sample creator profiles and six listings, but no reusable login credentials.
-
-To preserve an existing account’s resources, link its wallet **before its first wallet sign-in**, using the trusted server CLI while the database is running:
-
-```sh
-npm run wallet:assign -- --user-id=buyer_demo --address=0xYOUR_PUBLIC_WALLET_ADDRESS
-```
-
-Use `creator_demo` or another known user ID as needed. The CLI will not overwrite an existing wallet link or transfer a wallet from a different account. Sign-in still requires the linked wallet’s valid signature. Without linking, MetaMask creates a new account. For a hosted database, provide its environment explicitly when running this trusted CLI.
-
-The supplied `IMG_8207.PNG` is used as the website logo and embedded in a vector viewport for the favicon. The palette is sampled from its purple `#8848fd` and near-black `#07060b`, with readable light text.
-
-## Docker Compose
-
-```sh
-npm run setup:env
-docker compose up --build
-```
-
-The setup script creates `.env.supabase.local` and never overwrites an existing file. Fill its database connection before use, and preserve the encryption key when adopting existing records. Compose connects the API and worker to Supabase and runs Vite on **http://localhost:5173**. It does not provision another database or automatically seed/migrate hosted data. Apply SQL migrations explicitly before starting a fresh environment. Docker was not available in the implementation environment; the Compose build/start was not executed there.
-
-For the hosted database, configure `.env.supabase.local`, then run:
-
-```sh
-npm ci
-npm run db:migrate:supabase
-npm run db:check:supabase
-```
-
-`npm run dev` starts all local services. Standalone API and worker commands need their environment supplied explicitly. `db:seed` is only for isolated fixtures and requires `DEMO_MODE=true` and a non-production `NODE_ENV`.
-
-## Complete demo walkthrough
-
-1. Connect your **creator wallet** with MetaMask. Open **Agent builder**, enter a name and description, and configure a strategy. To guarantee a visible initial signal on simulated BTC/USD, use **Price alert**, entry **1000000**, exit **2000000**. These artificial levels demonstrate the workflow; they are not recommendations.
-2. Choose **Marketplace listing**, set a one-time price, then **Save & test version** and **Submit for review**. Private drafts can be run without publishing.
-3. Disconnect and connect a separate wallet listed in **ADMIN_WALLET_ADDRESSES**. Open **Administration**, inspect the tested configuration, enter a review note, and **Approve & publish**.
-4. Disconnect and connect your **buyer wallet**. Optionally open **Connections**, add **Local notification simulator**, supply a test recipient number, consent, and verify the clearly displayed local demo code. No phone message is sent.
-5. Find the approved listing in **Marketplace**, read the strategy, version, setup, license and external costs, then **Get this agent**. Accept both disclosures and **Continue to simulator**.
-6. The order remains pending with no entitlement. **Simulate successful payment** to activate a **DEMO** personal-use license. Failure, refund, and dispute controls are also provided for testing.
-7. Open **My agents**, **Set up paper runtime**, **Start**, then **Run cycle**. The worker also checks running instances every five seconds, with execution limited to the configured timeframe bucket. Inspect execution logs, signals, positions and paper orders. A HOLD decision creates no signal or notification.
-8. Open **Notifications** to see the timestamped in-app signal and, if configured and consented, a separately labeled **SIMULATED MESSAGE**. Download the exact licensed configuration and follow [runner/README.md](runner/README.md) to self-host it.
-
-**Pause** and **Stop** prevent subsequent execution. **Emergency stop** stops every runtime for the account and blocks new starts until explicitly cleared. Clearing it leaves runtimes stopped. Stopping retains the paper ledger and positions for inspection; it does not invent a closing trade.
+References: https://docs.dexscreener.com/api/reference and https://developer.dextools.io/.
 
 ## Verification
 
@@ -104,122 +55,6 @@ npm test
 npm run build
 ```
 
-Tests use an isolated in-memory PostgreSQL engine exposed over the PostgreSQL wire protocol, with the same `pg` repository and Supabase SQL migrations as the application. They cover strategy calculations, risk limits, invalid/stale data, purchase authorization, server pricing, signed webhook validation, retries, data isolation, immutable purchase versions, paper-order deduplication, emergency stop, reversals, wallet signature verification, nonce replay prevention, challenge expiry, domain/browser binding and disabled-wallet rejection. Database regression tests also check SQL injection protection, timestamp handling, nested-write rollback, relation projections, and preservation of existing records.
+Tests use isolated embedded PostgreSQL fixtures, never hosted application data. npm run dev:demo starts an optional isolated demo. The browser suite in e2e/ describes the Solana discovery, account, builder, and Coming soon flows. Run browser interaction checks through the supported browser tool in agent sessions.
 
-With the local demo running and Microsoft Edge installed on Windows (Google Chrome on other platforms):
-
-```sh
-npm run test:e2e
-```
-
-Browser tests cover marketplace search/filtering, mobile navigation/overflow, wallet sign-in, private-agent testing, purchase, execution, and notifications using an injected wallet test double. The signature verification itself is real; the browser tests do not operate an actual MetaMask extension. Full moderation is covered by HTTP integration tests. They write screenshots and failure traces to ignored `test-results/`. Set `PLAYWRIGHT_CHANNEL` to override the installed browser.
-
-Verified on 19 October 2026: the complete frontend/backend/runner build and all **30 service/strategy/runner tests** passed. All **3 browser checks** passed, covering desktop/mobile marketplace behavior, signed-wallet sign-in → private-agent creation/testing → purchase → paper execution → notification, and the missing-wallet state. Wallet browser tests use an injected provider test double with real cryptographic signatures; an actual MetaMask extension, external Stripe/Meta services, and Docker were not exercised.
-
-## Integrations and eligibility
-
-| Capability | Local behavior | External requirements |
-| --- | --- | --- |
-| Market data | Deterministic seeded-formula feed, timestamped and visibly simulated | Buyer-operated JSON market-data endpoint supported by the self-hosted runner; own provider fees/credentials |
-| Signal engine | Price thresholds, Wilder RSI, SMA crossover, portfolio observations | No AI dependency; backend computes decisions and risk limits deterministically |
-| Paper trading | Persisted cash, positions, signals, paper orders, errors | Real-money broker/exchange adapter is explicitly disabled |
-| Payments | Development-only simulator grants DEMO entitlements after server settlement | Stripe Checkout + Connect **test mode**, eligible marketplace/product/countries and creator onboarding |
-| Payouts | Simulator earnings are marked `SIMULATED_NOT_PAID` | Signed Connect payout events tracked separately from internal creator earnings; test payouts do not move money |
-| Notifications | In-app inbox and consented/verified local message simulator | Official WhatsApp verification/opt-out webhooks only; outbound delivery disabled |
-| AI explanations | Optional instructions saved as inert explanatory context | No external AI provider is called; credentials can be stored securely for future adapters |
-| Wallet identity | MetaMask message signing; server verifies the EOA signature | Browser extension, no wallet API key or RPC provider required |
-
-No external Stripe account, Meta delivery or external market-data provider was contacted or tested. Signed Stripe webhook behavior is tested locally with fixture secrets.
-
-### Stripe test mode
-
-Use an eligible platform and connected account. Set `STRIPE_ELIGIBILITY_CONFIRMED=true`, an `sk_test_` key, `STRIPE_WEBHOOK_SECRET`, and your verified eligible `STRIPE_CONNECT_COUNTRY`. Creator Studio exposes Connect test onboarding. Country is intentionally not guessed from the developer’s location. Never enable the eligibility flag without confirming the exact product category, marketplace model and supported countries with Stripe.
-
-Configure a webhook at `/api/webhooks/stripe` for:
-
-- `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`
-- `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`
-- `account.updated`
-- Connect `payout.created`, `payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled`
-
-Checkout uses `mode=payment`, server-selected USD price, and a destination charge with a server-calculated application fee. Raw-body signatures and freshness are verified; event IDs are persisted transactionally. Unpaid completion events cannot grant access. A success URL never grants access. Refunds revoke entitlements; disputes suspend them and stop corresponding runtimes. A won dispute may restore its suspended entitlement; refunds cannot be undone by a late paid webhook. Browser-supplied amounts and commission are ignored. No live-mode charges or webhooks are accepted.
-
-Provider documentation: [Stripe destination charges](https://docs.stripe.com/connect/marketplace/tasks/accept-payment/destination-charges), [Stripe webhooks](https://docs.stripe.com/webhooks), [Stripe restricted businesses](https://stripe.com/legal/restricted-businesses), [Connect country availability](https://docs.stripe.com/connect/cross-border-payouts).
-
-### Personal WhatsApp Agent Platform
-
-The primary connection uses the **personal WhatsApp Agent Platform**, documented in WhatsApp’s developer manual (v1, 25 August 2026). It is separate from the Business Cloud API. In WhatsApp Settings → Agents, create an agent, then copy its API key from Chat info. Save the key in Wagent Ai → Connections and send the generated LINK command in that agent chat. Availability depends on your account and rollout. Agent chats are not end-to-end encrypted.
-
-- Keys are encrypted with the persistent server encryption key. Creators cannot retrieve them. One key can only belong to one Wagent account.
-- Ownership requires a one-time, ten-minute pairing code and a successful reply to the agent creator. Only the paired creator’s recent text messages become commands.
-- The worker calls the fixed official `https://api.whatsapp.com/agent/v1/updates` endpoint, persists exact 64-bit cursors, and leases each connection so concurrent workers/manual syncs do not poll it together.
-- Incoming message IDs and command fills are idempotent. Reply sends with uncertain delivery are recorded as UNKNOWN and never automatically repeated. Known-not-accepted 429/503 replies use backoff.
-- Use `Buy $100 of BTC`, `Show portfolio`, `Start agent`, `Pause agent`, or `Stop all`. Orders create a two-minute preview and require their own eight-character CONFIRM code. Per-order/daily turnover, agent size/exposure, available cash/holdings, current entitlement, and emergency stop are checked before filling.
-- All fills and prices are simulated. Command orders currently support crypto/USD only. Existing autonomous strategy cycles can also create paper fills; they are distinct from confirmed chat instructions. No crypto transfers, real purchases, or withdrawals are implemented.
-- The website shows worker health and offers **Check messages** for a single manual sync. Deploy the separate worker for automatic replies. Vercel frontend/API hosting alone is insufficient.
-
-Official references: [personal agent developer manual](https://www.whatsapp.com/developer/WhatsApp-Agent-Platform-Developer-Manual.pdf), [third-party agent terms](https://www.whatsapp.com/legal/third-party-agents-terms). These documents do not constitute financial-services authorization. The legacy Business webhook/simulator remains separate and its outbound Business delivery remains disabled.
-
-### Coinbase connection
-
-Set server-only `COINBASE_CLIENT_ID` and `COINBASE_CLIENT_SECRET` from an approved Coinbase partner application. Register `APP_URL/api/brokers/coinbase/callback` as the exact callback URL (production: `https://wagent-ai.vercel.app/api/brokers/coinbase/callback`). New OAuth client creation currently requires approved/whitelisted access. See [Coinbase OAuth quickstart](https://docs.cdp.coinbase.com/coinbase-app/oauth2-integration/quickstart).
-
-The connector requests **wallet:accounts:read only**. Authorization uses PKCE S256, one-use expiring state, and the original wallet session. Tokens are encrypted; refresh tokens rotate once. An uncertain refresh requires reconnection. Disconnect removes saved tokens; users can also revoke the app in Coinbase. No trading/transfer scope or live-order endpoint exists in this release. Without approved credentials the UI explains the unavailable connection and paper trading continues.
-
-### Persistent worker deployment
-
-Use the same production DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY as Vercel. Include NODE_ENV=production, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test, and the HTTPS APP_URL. Build the repository and run `node dist/server/server/worker.js` as a persistent process, or run:
-
-```sh
-docker compose -f compose.worker.yaml up -d --build
-```
-
-The worker-only Compose file reads the ignored `.env.production.local` by default; override WAGENT_ENV_FILE for a different protected environment file. It never seeds or provisions a database. Apply migrations first. Automatic restart is enabled. Verify “Background service online” in Connections. No worker host is provisioned by a Vercel deployment. Real WhatsApp and Coinbase behavior must be verified with owner-supplied credentials; integration tests use protocol fixtures.
-
-### License and operating costs
-
-A purchase provides perpetual, non-transferable personal use of the purchased version. The creator keeps intellectual property; redistribution and resale are prohibited. Future strategy versions require review and existing purchasers stay pinned to their version. This MVP prevents a duplicate purchase of the same agent; a later paid-upgrade offer would require a separate explicit product flow. Setup support covers the purchased version for 30 days. Hosting, market data, AI calls, and message fees are external costs borne by each buyer. No unlimited service or free future versions are promised. The platform never holds trading funds.
-
-An agent’s name, description, category, tags and cover are fixed after its first save, so draft edits cannot change the identity of an already-reviewed listing. Strategy, risk, market, pricing and setup updates create a new immutable version and require approval before replacing the public version. Create a new agent for a different identity.
-
-Authorized exports include only public agent identity, versioned configuration, license terms and setup/runtime instructions. Provider credentials, creator private data and buyer records are excluded. An already downloaded offline configuration cannot be remotely erased following a refund; website entitlements and managed runtimes are revoked/suspended.
-
-## Vercel deployment
-
-The root `vercel.json` publishes `dist/web`, routes `/api/*` to the existing Express app exported by `api/index.ts`, and serves `index.html` for React Router pages such as `/marketplace` and `/auth`. Keep the Vercel project root at the repository root and the framework preset at **Vite**. The build command is `npm run build`; no local database is started during the build.
-
-Configure these server environment variables in the Vercel project's **Production** environment before deploying:
-
-| Variable | Value |
-| --- | --- |
-| `DATABASE_URL` | Hosted PostgreSQL connection string, with pooling and TLS configured for the database provider |
-| `CREDENTIAL_ENCRYPTION_KEY` | Persistent, randomly generated 64-character hexadecimal key; keep it secret and retain it across deployments |
-| `APP_URL` | `https://wagent-ai.vercel.app` or the final HTTPS custom domain |
-| `DEMO_MODE` | `false` |
-| `PAYMENT_PROVIDER` | `stripe_test` |
-| `ADMIN_WALLET_ADDRESSES` | Optional public administrator wallet addresses |
-
-Vercel sets `NODE_ENV=production`. Keep all database URLs, encryption keys, and provider secrets server-only; never give them a `VITE_` prefix. Set separate values and the correct `APP_URL` for any Preview environment you use. MetaMask sign-in verifies the configured origin.
-
-Apply committed SQL migrations with `npm run db:migrate:supabase`, or `npm run db:migrate` in a trusted environment containing `DATABASE_URL`. Runtime and migration traffic can both use the Supabase transaction pooler on port 6543; the runner holds a transaction lock and records versions in `supabase_migrations.schema_migrations`. Use verified TLS and the bundled Supabase CA. Existing local fixture records are not uploaded by deploying the repository. Do not run the demo seed against a hosted production database. Stripe test checkout additionally requires the test credentials and eligibility configuration described above.
-
-The API function handles requests only. The existing `npm run worker` process must run separately on a persistent worker host with the same database and encryption configuration for automatic paper execution. Do not launch `npm run dev` or the five-second worker loop inside a Vercel Function. `/api/health` checks database connectivity; `/api/bootstrap` checks the marketplace's initial data response.
-
-API and wallet sign-in rate limits use Vercel's validated client-IP header only when running on Vercel. Standalone servers ignore that header. IPv6 addresses retain subnet-based rate limiting.
-
-## Architecture and operational boundaries
-
-- `src/`: responsive React product UI, CSS Modules, marketplace, builder, checkout, library, creator/admin dashboards, connections and inbox.
-- `server/`: Express API, authorization, encrypted connections, provider adapters, payment transitions, deterministic execution, and separate worker.
-- `shared/`: strict Zod declarative schemas and pure deterministic strategy/risk calculations shared by server and runner.
-- `supabase/migrations/`: committed PostgreSQL schema and security migrations.
-- `server/database/`: typed application records, whitelisted query construction, and pooled PostgreSQL access.
-- `scripts/`: SQL migration/check commands and the optional isolated demo seed.
-- `runner/`: Docker-based self-hosted paper runtime and persisted local control/ledger files.
-- `tests/`, `e2e/`: service/strategy security tests and browser workflow tests.
-
-Sessions use random opaque tokens stored hashed in PostgreSQL, HttpOnly/SameSite cookies, expiry, verified wallet ownership, origin verification and a required custom request header. Production cookies are Secure and production startup requires an HTTPS `APP_URL`. Credentials use AES-256-GCM with a separate server-only encryption key and are never returned to the browser. Server errors log only error type/code. HTTP limits, strict schemas and body limits reject abusive payloads and executable configuration fields. Cover images use HTTPS image URLs or bundled diagrams; there is no arbitrary upload execution or server-side URL fetching.
-
-Financial and execution mutations use serializable database transactions, account/instance/order row locks, unique order/entitlement/event/signal/paper-trade keys, and bounded serialization retries. The worker checks entitlement, account state, emergency stop and runtime status within the execution transaction. Data must be chronological, positive, timestamped, and no older than two configured candles. Risk exits bypass cooldown; entries respect cash, configured size, aggregate exposure, and one position per symbol.
-
-The deployed MVP remains paper-only and Stripe-test-only. To serve the built frontend from Express behind your own HTTPS proxy, set `NODE_ENV=production`, `DEMO_MODE=false`, `PAYMENT_PROVIDER=stripe_test`, a real PostgreSQL URL, server-only encryption key and HTTPS `APP_URL`, then `npm run build` and `npm start`. The production launcher does not seed demo users or grant DEMO entitlements. Infrastructure TLS, backups and deployment-specific operations belong to your hosting setup.
+Personal WhatsApp availability depends on the account rollout. Pairing only accepts the agent creator and never stores wallet recovery phrases. Agent chats are not end-to-end encrypted. MetaMask account/network changes end the workspace session. Account sign-in is independent of future Solana swap authorization.

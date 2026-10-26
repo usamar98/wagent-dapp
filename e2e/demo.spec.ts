@@ -1,19 +1,42 @@
-import {test,expect,type Page} from '@playwright/test';
-import {Wallet,getBytes} from 'ethers';
-async function installWalletDouble(page:Page){const wallet=Wallet.createRandom();await page.exposeFunction('__signMetaMaskTest',(message:string)=>wallet.signMessage(getBytes(message)));await page.addInitScript(({address})=>{Object.defineProperty(window,'ethereum',{configurable:true,value:{isMetaMask:true,request:async({method,params}:any)=>{if(method==='eth_requestAccounts'||method==='eth_accounts')return [address];if(method==='eth_chainId')return '0x1';if(method==='personal_sign')return (window as any).__signMetaMaskTest(params[0]);throw new Error('Unexpected wallet method: '+method)}}})},{address:wallet.address});return wallet}
-test('marketplace filtering, responsive navigation and no horizontal overflow',async({page})=>{
-  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.goto('/marketplace');await expect(page.getByRole('link',{name:/Signal Atlas/}).first()).toBeVisible();await page.screenshot({path:'test-results/marketplace-desktop.png',fullPage:true,animations:'disabled'});
-  await page.getByRole('tab',{name:'Forex',exact:true}).click();await expect(page.getByRole('link',{name:/Forex Radar/}).first()).toBeVisible();await expect(page.getByRole('link',{name:/Signal Atlas/})).toHaveCount(0);
-  await page.getByRole('tab',{name:'All agents',exact:true}).click();await page.getByRole('textbox',{name:'Search marketplace'}).fill('no-such-agent-xyz');await expect(page.getByRole('heading',{name:'No agents match just yet'})).toBeVisible();await page.getByRole('button',{name:'Clear all filters'}).click();
-  await page.setViewportSize({width:390,height:844});await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:'test-results/marketplace-mobile.png',fullPage:true,animations:'disabled'});await page.getByRole('button',{name:'Open navigation'}).click();await expect(page.getByRole('link',{name:'My agents',exact:true})).toBeVisible();expect(errors).toEqual([]);
+import {test,expect} from '@playwright/test';
+const mint='So11111111111111111111111111111111111111112';
+const token={mint,pairAddress:mint,name:'Browser fixture token',symbol:'FIXTURE',dex:'fixture',priceUsd:1,change24h:2,volume24h:3000,liquidityUsd:20000,marketCap:null,pairCreatedAt:Date.now()-3600000,screenerUrl:`https://dexscreener.com/solana/${mint}`,toolsUrl:`https://www.dextools.io/app/en/solana/pair-explorer/${mint}`};
+const feed={tokens:[token],source:'DEX Screener',fetchedAt:new Date().toISOString(),stale:false,coverage:'Browser-only fixture'};
+
+test('Solana discovery, Coming soon features, responsive navigation and contained tables',async({page})=>{
+  await page.route('**/api/solana/tokens**',route=>route.fulfill({json:feed}));
+  await page.route('**/api/bootstrap',route=>route.fulfill({json:{user:null,demo:false}}));
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('/');await expect(page.getByRole('heading',{name:'Your Solana edge. One WhatsApp away.'})).toBeVisible();
+  await expect(page.getByRole('link',{name:'Open FIXTURE on DEXTools'})).toHaveAttribute('href',token.toolsUrl);
+  await page.getByRole('link',{name:'Buy & sell Coming soon',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Your tokens. Your next move.'})).toBeVisible();
+  await expect(page.getByText('This feature is not enabled. No orders are sent and no automated alerts are scheduled.')).toBeVisible();
+  await page.getByRole('link',{name:'Explore tokens',exact:true}).click();
+  await page.getByRole('textbox',{name:'Search Solana tokens'}).fill(mint);await page.getByRole('button',{name:'Search',exact:true}).click();
+  await expect(page).toHaveURL(new RegExp('q='+mint));
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.getByRole('button',{name:'Open navigation'}).click();await expect(page.getByRole('link',{name:'WhatsApp connection',exact:true})).toBeVisible();
+  await page.getByRole('link',{name:'Token alerts Coming soon',exact:true}).click();await expect(page.getByRole('heading',{name:'Stay close to what’s moving.'})).toBeVisible();
+  expect(errors).toEqual([]);
 });
-test('MetaMask sign-in, create and test a private agent, purchase and run a paper agent',async({page})=>{
-  await installWalletDouble(page);const name='Wallet browser sentinel '+Date.now();
-  await page.goto('/auth');await expect(page.getByRole('heading',{name:'Connect with MetaMask.'})).toBeVisible();await expect(page.getByLabel('Email address')).toHaveCount(0);await expect(page.getByLabel('Password',{exact:true})).toHaveCount(0);await page.getByRole('button',{name:'Connect MetaMask',exact:true}).click();await expect(page.getByRole('heading',{name:'My agents',exact:true})).toBeVisible();
-  await page.getByRole('link',{name:'Agent builder',exact:true}).click();await page.getByLabel('Agent name').fill(name);await page.getByLabel('Description',{exact:true}).fill('A private wallet-owned sentinel using deterministic simulated data.');await page.getByRole('button',{name:'Configure strategy'}).click();await page.getByLabel('Strategy type').selectOption('price_alert');await page.getByLabel('Entry threshold').fill('1000000');await page.getByLabel('Exit threshold').fill('2000000');await page.getByRole('button',{name:'Test & publish',exact:true}).click();await page.getByRole('button',{name:'Save & test version'}).click();await expect(page.getByText('Saved version tested',{exact:true})).toBeVisible();
-  await page.getByRole('link',{name:'Marketplace',exact:true}).click();await page.getByRole('textbox',{name:'Search marketplace'}).fill('Signal Atlas');await page.getByRole('link',{name:/^Signal Atlas/}).click();await page.getByRole('link',{name:'Get this agent'}).click();await page.getByRole('checkbox',{name:/I accept/}).check();await page.getByRole('checkbox',{name:/I understand/}).check();await page.getByRole('button',{name:'Continue to simulator'}).click();await page.getByRole('button',{name:'Simulate successful payment'}).click();await expect(page.getByRole('heading',{name:'Your agent is ready.'})).toBeVisible();await page.getByRole('link',{name:'Go to My agents'}).click();
-  const runtime=page.locator('section').filter({has:page.getByRole('heading',{name:'Signal Atlas',exact:true})});await runtime.getByRole('button',{name:'Set up paper runtime'}).click();await runtime.getByRole('button',{name:'Start',exact:true}).click();await runtime.getByRole('button',{name:'Run cycle'}).click();await runtime.getByText('Execution log, signals & paper orders').click();await expect(runtime.getByText('PAPER BUY',{exact:true})).toBeVisible();await page.getByRole('link',{name:'Notifications',exact:true}).click();await expect(page.getByRole('heading',{name:'BTC/USD: BUY',exact:true}).first()).toBeVisible();
-  await page.getByRole('button',{name:'Disconnect wallet',exact:true}).click();await expect(page.getByRole('link',{name:'Connect your wallet'})).toBeVisible();
+
+test('private builder saves exact Solana mints and points to WhatsApp setup',async({page})=>{
+  await page.route('**/api/bootstrap',route=>route.fulfill({json:{user:{id:'browser-fixture',name:'Browser fixture',walletAddress:'0x1111111111111111111111111111111111111111',emergencyStop:false},demo:false}}));
+  let payload:any;
+  await page.route('**/api/agents',async route=>{payload=route.request().postDataJSON();await route.fulfill({status:201,json:{id:'browser-agent',versions:[{id:'browser-version'}]}})});
+  await page.goto('/builder');await page.getByLabel('Agent name').fill('My Solana monitor');
+  await page.getByLabel('What should it focus on?').fill('Follow selected Solana token mints and save a private agent configuration.');
+  await page.getByLabel('Solana mint addresses').fill(mint);await page.getByRole('button',{name:'Create private agent'}).click();
+  await expect(page.getByRole('heading',{name:'Now give it a conversation.'})).toBeVisible();
+  expect(payload.config.network).toBe('solana');expect(payload.config.market).toBe('crypto');expect(payload.config.symbols).toEqual([mint]);
+  await expect(page.getByRole('link',{name:'Connect WhatsApp',exact:true})).toHaveAttribute('href','/connections');
 });
-test('missing MetaMask is explained without an email/password fallback',async({page})=>{await page.goto('/auth');await expect(page.getByRole('heading',{name:'Connect with MetaMask.'})).toBeVisible();await page.screenshot({path:'test-results/wallet-sign-in.png',animations:'disabled'});await page.getByRole('button',{name:'Connect MetaMask',exact:true}).click();await expect(page.getByRole('alert')).toContainText('MetaMask was not detected');await expect(page.getByRole('link',{name:'Get MetaMask'})).toBeVisible()});
+
+test('MetaMask identity is clearly separate from upcoming Solana signing',async({page})=>{
+  await page.route('**/api/bootstrap',route=>route.fulfill({json:{user:null,demo:false}}));
+  await page.goto('/auth');await expect(page.getByRole('heading',{name:'Connect your account',exact:true})).toBeVisible();
+  await expect(page.getByText(/This connects your workspace identity using an EVM account/)).toBeVisible();
+  await page.getByRole('button',{name:'Continue with MetaMask'}).click();await expect(page.getByRole('alert')).toContainText('MetaMask was not detected');
+});

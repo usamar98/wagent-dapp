@@ -8,6 +8,7 @@ import { deliverNotifications } from './notifications.js';
 export async function canUseVersion(tx: Tx, userId: string, versionId: string) {
   const version=await tx.agentVersion.findUnique({where:{id:versionId},include:{agent:true}});
   check(version,404,'Agent version not found');
+  check(configSchema.safeParse(version.config).success,409,'This agent predates the Solana workspace. Create a Solana agent to continue.');
   if(version.agent.creatorId!==userId) {
     const entitlement=await tx.entitlement.findFirst({where:{buyerId:userId,versionId,status:'ACTIVE'}});
     check(entitlement && (entitlement.environment!=='DEMO'||env.demo),403,'An active entitlement for this version is required');
@@ -18,6 +19,7 @@ async function notify(tx: Tx,userId:string,signalId:string,title:string,body:str
   await deliverNotifications(tx,{userId,signalId,title,body},channels);
 }
 export async function runInstance(instanceId: string,now=new Date(),feed=simulatedFeed) {
+  check(env.demo,409,'Automated execution is coming soon. Paper execution is available only in isolated demo fixtures.');
   const found=await db.instance.findUnique({where:{id:instanceId},include:{version:true}}); check(found,404,'Runtime not found');
   const config=configSchema.parse(found.version.config), bucket=String(Math.floor(now.getTime()/timeframeMs[config.timeframe]));
   try {
@@ -60,6 +62,7 @@ export async function runInstance(instanceId: string,now=new Date(),feed=simulat
   }
 }
 export async function tick() {
+  if (!env.demo) return;
   const instances=await db.instance.findMany({where:{status:'RUNNING',user:{emergencyStop:false,disabled:false}},select:{id:true}});
   for(const instance of instances) {try{await runInstance(instance.id);}catch{/* Persisted execution error or changed control state. Never log credentials. */}}
 }

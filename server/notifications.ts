@@ -14,7 +14,7 @@ export const localMessageAdapter:NotificationAdapter={channel:'simulator',async 
   if(connection?.verifiedAt&&connection.consentAt&&!connection.optedOutAt)await tx.notification.create({data:{...input,title:`[SIMULATED MESSAGE] ${input.title}`,channel:'simulator',status:'SIMULATED_DELIVERY'}});
 }};
 export const whatsappAdapter:NotificationAdapter={channel:'whatsapp',async deliver(){
-  throw new Error('Official WhatsApp delivery is disabled: exact trading, crypto, forex, and AI-agent use-case eligibility has not been established. Recipient consent and approved templates alone do not establish eligibility.');
+  throw new Error('Proactive WhatsApp token alerts are coming soon. Personal agent pairing and command replies use the separate personal-agent connection.');
 }};
 export async function deliverNotifications(tx:Tx,input:NotificationInput,channels:string[]){
   for(const adapter of [inAppAdapter,localMessageAdapter])if(channels.includes(adapter.channel))await adapter.deliver(tx,input);

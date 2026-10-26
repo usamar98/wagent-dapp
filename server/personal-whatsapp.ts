@@ -96,7 +96,7 @@ export async function syncPersonalAgent(userId: string) {
           const pairing = message.text?.body.trim().match(/^link ([A-F0-9]{12})$/i);
           if (!pairing || !fresh.pairingHash || hash(pairing[1].toUpperCase()) !== fresh.pairingHash || !fresh.pairingExpiresAt || fresh.pairingExpiresAt < new Date()) continue;
           // Meta rejects sends to anyone other than this agent's creator.
-          await sendReply(decrypt(fresh.encryptedToken), message.from, 'Wagent Ai connected. PAPER MODE only. Choose and start an agent on the website, then try “Buy $100 of BTC”. Every order needs a confirmation code. Send Help for commands.');
+          await sendReply(decrypt(fresh.encryptedToken), message.from, 'Wagent Ai connected. Select your Solana agent in Connections on the website. Send Help or Status to check your setup. Live buy/sell and automated token alerts are coming soon. Pairing does not authorize access to wallet funds.');
           await transaction(async tx => {
             await lockUser(tx, userId);
             await tx.personalAgentChannel.updateMany({ where: { id: fresh.id, leaseToken: lease, pairingHash: fresh.pairingHash, enabled: true }, data: { ownerId: message.from, agentId: entry.id, pairingHash: null, pairingExpiresAt: null, lastMessageAt: new Date() } });

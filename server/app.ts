@@ -15,7 +15,7 @@ import { canUseVersion, runInstance } from './execution.js';
 import { createOrder, applyPaymentEvent, handleStripeWebhook, stripeClient } from './payments.js';
 import { tradingRouter } from './trading.js';
 import { personalWhatsAppRouter } from './personal-whatsapp.js';
-import { coinbaseRouter } from './coinbase.js';
+import { solanaRouter } from './solana.js';
 
 export const app=express();
 app.disable('x-powered-by');
@@ -40,12 +40,21 @@ app.post('/api/webhooks/whatsapp',express.raw({type:'application/json',limit:'25
 });
 app.use(express.json({limit:'64kb'}),cookieParser(),session);
 app.use('/api',csrf);
+// Preserve historical records while keeping the public release limited to setup and research.
+app.use(['/api/marketplace','/api/checkout','/api/creator/connect','/api/versions/:id/submit'],(_req,_res,next)=>{
+  if (!env.demo) return next(new AppError(409,'The agent marketplace and purchases are coming soon. Create a private Solana agent instead.'));
+  next();
+});
+app.use('/api/instances/:id/control',(req,_res,next)=>{
+  if (!env.demo && req.method==='POST' && req.body?.action==='start') return next(new AppError(409,'Automated token monitoring is coming soon. Your agent configuration and WhatsApp pairing are available now.'));
+  next();
+});
 const authLimit=rateLimit({windowMs:15*60000,limit:env.demo?100:15,message:{error:'Too many authentication attempts. Try again later.'}});
-app.get('/api/health',async(_req,res)=>{await db.sql`SELECT 1`;res.json({ok:true,demo:env.demo,execution:'paper_only'});});
+app.get('/api/health',async(_req,res)=>{await db.sql`SELECT 1`;res.json({ok:true,demo:env.demo,network:'solana',execution:env.demo?'paper_only':'coming_soon'});});
 app.get('/api/bootstrap',async(req,res)=>{res.json({user:req.user||null,demo:env.demo,costs,licenseTerms,commissionBps:Number((await db.setting.findUnique({where:{key:'commissionBps'}}))?.value||1000),whatsapp:{enabled:true,platform:'personal_agent',execution:'paper_only',termsUrl:'https://www.whatsapp.com/legal/third-party-agents-terms'},stripeEnabled:env.paymentsEligible&&env.stripeKey.startsWith('sk_test_')});});
 app.use('/api/trading', tradingRouter);
 app.use('/api/whatsapp-agent', personalWhatsAppRouter);
-app.use('/api/brokers/coinbase', coinbaseRouter);
+app.use('/api/solana', solanaRouter);
 app.use('/api/auth/wallet',walletAuth);
 app.post('/api/auth/logout',async(req,res)=>{if(req.cookies?.ab_session)await db.session.deleteMany({where:{id:hash(req.cookies.ab_session)}});res.clearCookie('ab_session',{path:'/'}).clearCookie('ab_wallet_challenge',{path:'/api/auth/wallet'}).json({ok:true});});
 
