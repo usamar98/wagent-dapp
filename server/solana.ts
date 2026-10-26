@@ -96,7 +96,9 @@ export async function discoverTokens(query = '', mints?: string[]): Promise<Toke
 
 export const solanaRouter = Router();
 solanaRouter.get('/tokens', rateLimit({ windowMs: 60000, limit: 40, keyGenerator: rateLimitKey, standardHeaders: 'draft-8', legacyHeaders: false }), async (req, res) => {
-  const input = z.object({ q: z.string().trim().max(80).optional(), mints: z.string().max(1400).optional() }).strict().parse(req.query);
+  // Vercel's catch-all rewrite injects `path`; it is routing metadata, never an upstream parameter.
+  const { path: _rewrittenPath, ...query } = req.query;
+  const input = z.object({ q: z.string().trim().max(80).optional(), mints: z.string().max(1400).optional() }).strict().parse(query);
   const mints = input.mints === undefined ? undefined : z.array(address).max(30).parse(input.mints ? input.mints.split(',') : []);
   const feed = await discoverTokens(input.q, mints ? [...new Set(mints)] : undefined);
   res.json(feed);

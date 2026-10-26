@@ -77,6 +77,8 @@ describe('Solana discovery and private watchlists',()=>{
     expect(first.status).toBe(200);expect(second.status).toBe(200);expect(first.body.tokens).toHaveLength(1);expect(first.body.coverage).toContain('Not a complete launch feed');expect(mock).toHaveBeenCalledTimes(2);
     expect(mock.mock.calls[1][0]).toBe(`https://api.dexscreener.com/tokens/v1/solana/${jupMint}`);
     await client.get('/api/solana/tokens');expect(mock).toHaveBeenCalledTimes(2);
+    expect((await client.get('/api/solana/tokens?path=solana/tokens')).status).toBe(200);expect(mock).toHaveBeenCalledTimes(2);
+    expect((await client.get('/api/solana/tokens?unknown=unexpected')).status).toBe(400);
     expect((await client.get('/api/solana/tokens?mints=invalid')).status).toBe(400);
   });
   it('reports upstream failures without invented token prices',async()=>{
