@@ -119,6 +119,25 @@ describe('chat trading agent setup',()=>{
       expect(snapshot.permission.active).toBe(false);expect(snapshot.permission.revokedAt).not.toBeNull();expect(snapshot.availableMints).toEqual([OTHER]);
     });
   });
+  it('adds a token to the current agent without broadening permission until a fresh owner signature',async()=>{
+    await withAgent([MINT],async agent=>{
+      expect((await post('/agent',{versionId:agent.versions[0].id,mints:[MINT]})).status).toBe(200);
+      await grant();const p=provider();
+      const saved=await post('/agent',{versionId:agent.versions[0].id,mints:[MINT,OTHER]});expect(saved.status).toBe(200);
+      const version=await db.agentVersion.findUniqueOrThrow({where:{id:saved.body.versionId}});
+      expect(version.agentId).toBe(agent.id);expect(version.number).toBe(2);expect(version.config.symbols).toEqual([MINT,OTHER]);
+      expect((await db.agentVersion.findUniqueOrThrow({where:{id:agent.versions[0].id}})).config.symbols).toEqual([MINT]);
+      const snapshot=(await client.get('/api/solana/chat-trading')).body;
+      expect(snapshot.agentSetup.selectedVersionId).toBe(version.id);expect(snapshot.availableMints).toEqual([MINT,OTHER]);
+      expect(snapshot.permission.active).toBe(false);expect(snapshot.permission.revokedAt).not.toBeNull();expect(snapshot.permission.allowedMints).toEqual([MINT]);
+      expect(snapshot.wallet.address).toBe(tradingAddress);expect(snapshot.wallet.ownerAddress).toBe(ownerAddress);expect(snapshot.paired).toBe(true);
+      expect(await db.solanaPermissionChallenge.count({where:{userId}})).toBe(0);expect(p.mock).not.toHaveBeenCalled();
+      await grant({allowedMints:[MINT,OTHER]});
+      const approved=(await client.get('/api/solana/chat-trading')).body.permission;
+      expect(approved.active).toBe(true);expect(approved.allowedMints).toEqual([MINT,OTHER].sort());
+      expect(approved.perTradeSol).toBe(limits.perTradeSol);expect(approved.dailySol).toBe(limits.dailySol);expect(p.submissions()).toBe(0);
+    });
+  });
   it('reuses an unchanged selected version without duplicates or revoking an unchanged permission',async()=>{
     await withAgent([MINT],async agent=>{
       const input={versionId:agent.versions[0].id,mints:[MINT]};expect((await post('/agent',input)).body.versionId).toBe(input.versionId);

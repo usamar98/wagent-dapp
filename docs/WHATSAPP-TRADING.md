@@ -12,6 +12,12 @@
 
 The current chat policy accepts user-paid Metis exact-input v2 routes with one dedicated-wallet signer. Unsupported routers, route layouts, authority changes, unsafe simulations, and routes without verified expiry are blocked. Use the manual Buy & sell flow for unsupported routes. Not every listed token has an executable route.
 
+### Add a token to an existing agent
+
+On **WhatsApp trading**, expand **Manage agent tokens**. Keep the current agent selected, retain the mints you still want, and append the new exact Solana mint on a separate line in **Tokens this agent may trade**. Select **Save tokens & use agent**. This creates and selects a new version of the same agent, preserving the existing owner, trading wallet, funds, and WhatsApp pairing. Changing the token list revokes the previous trading permission.
+
+The page continues to **Approve limits** when a trading wallet already exists. Include the new mint in **Allowed tokens from your agent**, review budgets, fee/rent cap, slippage, and expiry, then select **Review permission** and **Sign permission & enable trading** with the original owner wallet. Saving a mint never grants spending access on its own. Rejected WhatsApp commands are not retried automatically; send a fresh command after approval. The overview's discovery list and watchlist never change the signed allowed-token list.
+
 ### If Connect wallet says Done but Add SOL is locked
 
 Wallet verification, WhatsApp pairing, and agent selection are separate requirements. A verified wallet does not need another connection prompt just to continue. Check the two setup status labels on the WhatsApp trading page. If no token agent is selected, choose a saved private agent there, enter the exact mint addresses of tokens you want to trade, and select **Save tokens & use agent**. SOL is the funding currency; a list containing only native/wrapped SOL cannot enable buying another token.
