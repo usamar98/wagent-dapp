@@ -23,6 +23,7 @@ import { registerProductionWebsite } from './website-runtime.js';
 import { solanaPermissionsRouter, revokeTrading } from './solana-permissions.js';
 import { chatExecutionRouter } from './solana-chat-trading.js';
 import { solanaWithdrawalRouter } from './solana-withdrawals.js';
+import { solanaFundingRouter } from './solana-funding.js';
 
 export const app=express();
 app.disable('x-powered-by');
@@ -65,6 +66,7 @@ app.use('/api/whatsapp-agent', personalWhatsAppRouter);
 app.use('/api/solana', chatExecutionRouter);
 app.use('/api/solana', solanaPermissionsRouter);
 app.use('/api/solana/chat-trading', solanaWithdrawalRouter);
+app.use('/api/solana/chat-trading', solanaFundingRouter);
 app.use('/api/solana', solanaRouter);
 app.use('/api/solana', solanaSwapsRouter);
 app.use('/api/solana', solanaAlertsRouter);

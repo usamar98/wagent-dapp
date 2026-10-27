@@ -21,6 +21,11 @@ function wire(wallet:string,blockhash:string,instructions:Instruction[],mint:str
   for(const ix of instructions)parts.push(Buffer.from([keys.indexOf(ix.program)]),short(ix.accounts.length),Buffer.from(ix.accounts.map(a=>keys.indexOf(a))),short(ix.data.length),ix.data);
   const message=Buffer.concat(parts),transaction=Buffer.concat([Buffer.from([1]),Buffer.alloc(64),message]).toString('base64');decodeSwapTransaction(transaction,wallet);return transaction;
 }
+export function solTransferWire(from:string,to:string,amount:string,blockhash:string){
+  check(from!==to,400,'The owner and trading-wallet addresses must be different.');
+  const data=Buffer.alloc(12);data.writeUInt32LE(2);data.writeBigUInt64LE(BigInt(amount),4);
+  return wire(from,blockhash,[{program:SYSTEM_PROGRAM,accounts:[from,to],data}],SOL_MINT);
+}
 export async function buildWithdrawal(wallet:string,owner:string,mint:string,value:string){
   check(wallet!==owner,400,'Withdrawal recipient must be your original owner wallet.');
   const block=await rpc('getLatestBlockhash',[{commitment:'confirmed'}]);check(addressSchema.safeParse(block?.value?.blockhash).success&&Number.isSafeInteger(block.value.lastValidBlockHeight),502,'A fresh blockhash is unavailable.');

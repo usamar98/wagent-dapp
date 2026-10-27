@@ -4,7 +4,7 @@ A Solana-only agent workspace. Create a private token configuration, pair your p
 
 ## Available now
 
-- MetaMask or Binance Wallet message sign-in for EVM workspace identity. Verify the separate Solana owner account in Binance Wallet, Phantom, Solflare, or another compatible Wallet Standard wallet for trading. No Binance API key is needed.
+- MetaMask, Binance Wallet, or Phantom message sign-in for EVM workspace identity. Verify the separate Solana owner account in Binance Wallet, Phantom, Solflare, or another compatible Wallet Standard wallet for trading. No Binance API key is needed.
 - Private agent creation with 1–10 Solana token mints.
 - Agent selection, encrypted personal WhatsApp keys, one-time ownership pairing, manual sync, and background polling.
 - Real Solana token discovery and mint search from DEX Screener, refreshed every 60 seconds.
@@ -13,6 +13,7 @@ A Solana-only agent workspace. Create a private token configuration, pair your p
 - Activity history, ownership isolation, and emergency stop.
 - Jupiter exact-input SOL/token swaps with one-use Solana wallet ownership proofs, a review screen, and wallet approval for every transaction.
 - Optional WhatsApp-only trading from a separately funded, server-managed wallet: signed advance permission, approved mints, per-trade/daily SOL budgets, fee and slippage caps, expiry, and revoke access. Owner-signed SOL/token withdrawals return funds to the original owner wallet. See [WhatsApp trading](docs/WHATSAPP-TRADING.md).
+- Guided setup after WhatsApp pairing: connect Binance Wallet or Phantom, create a trading wallet, review and approve a one-time SOL deposit, then sign trading limits. External-wallet/exchange deposits remain available by copying the Solana address. No new API key is required.
 - DEX Screener token discovery, price, and liquidity alerts, delivered in app or to the explicitly selected paired WhatsApp chat.
 
 ## Coming soon

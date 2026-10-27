@@ -14,6 +14,7 @@ export type SolanaWallet = {
     'standard:events'?: { on(event: 'change', listener: () => void): () => void };
     'solana:signMessage'?: { signMessage(input: { account: WalletAccount; message: Uint8Array }): Promise<readonly { signature: Uint8Array; signedMessage: Uint8Array }[]> };
     'solana:signTransaction'?: { signTransaction(input: { account: WalletAccount; chain: string; transaction: Uint8Array }): Promise<readonly { signedTransaction: Uint8Array }[]> };
+    'solana:signAndSendTransaction'?: { signAndSendTransaction(input: { account: WalletAccount; chain: string; transaction: Uint8Array; options: { preflightCommitment: 'confirmed'; skipPreflight: false; maxRetries: 0 } }): Promise<readonly { signature: Uint8Array }[]> };
   };
 };
 
@@ -102,4 +103,38 @@ export async function signSwap(wallet: SolanaWallet, address: string, transactio
   assertCurrentAccount(wallet, account, 'solana:signTransaction');
   if (results.length !== 1 || !(results[0]?.signedTransaction instanceof Uint8Array) || !results[0].signedTransaction.length) throw new Error('The wallet did not return a signed transaction.');
   return toBase64(results[0].signedTransaction);
+}
+
+export const canFundWithWallet = (wallet: SolanaWallet | undefined) => typeof wallet?.features['solana:signAndSendTransaction']?.signAndSendTransaction === 'function';
+export function solFundingLamports(amount: string) {
+  if (!/^\d{1,12}(?:\.\d{1,9})?$/.test(amount)) throw new Error('Enter a positive SOL amount with at most 9 decimal places.');
+  const [whole, fraction = ''] = amount.split('.'), lamports = BigInt(whole) * 1000000000n + BigInt(fraction.padEnd(9, '0'));
+  if (lamports <= 0n || lamports > 18446744073709551615n) throw new Error('Enter a supported positive SOL amount.');
+  return lamports;
+}
+export function validateSolFundingTransaction(transaction: string, from: string, to: string, amount: string) {
+  const wire = Uint8Array.from(atob(transaction), c => c.charCodeAt(0));
+  const matches = (start: number, expected: Uint8Array | number[]) => sameBytes(wire.slice(start, start + expected.length), Uint8Array.from(expected));
+  // Exactly one native System transfer, one owner signature, no additional instructions.
+  if (from === to || wire.length !== 215 || !matches(0, [1]) || !matches(1, new Uint8Array(64)) ||
+      !matches(65, [1, 0, 1, 3]) || !matches(69, bs58.decode(from)) || !matches(101, bs58.decode(to)) ||
+      !matches(133, new Uint8Array(32)) || !matches(197, [1, 2, 2, 0, 1, 12, 2, 0, 0, 0]) ||
+      new DataView(wire.buffer).getBigUint64(207, true) !== solFundingLamports(amount)) {
+    throw new Error('The deposit does not match the reviewed owner, trading wallet, and SOL amount. Nothing was submitted.');
+  }
+  return wire;
+}
+export async function fundSolanaWallet(wallet: SolanaWallet, input: { from: string; to: string; amount: string; transaction: string; expiresAt: string }, onSubmitting?: () => void) {
+  const feature = wallet.features['solana:signAndSendTransaction'];
+  if (!feature) throw new Error('Use the deposit address to transfer SOL from this wallet. In-app deposits require wallet transaction sending support.');
+  const wire = validateSolFundingTransaction(input.transaction, input.from, input.to, input.amount);
+  const account = await connectAccount(wallet, 'solana:signAndSendTransaction', input.from);
+  if (!Number.isFinite(Date.parse(input.expiresAt)) || Date.parse(input.expiresAt) <= Date.now()) throw new Error('The deposit review expired. Review the amount again for a fresh network blockhash.');
+  assertCurrentAccount(wallet, account, 'solana:signAndSendTransaction');
+  onSubmitting?.();
+  const results = await feature.signAndSendTransaction({ account, chain: MAINNET, transaction: wire, options: { preflightCommitment: 'confirmed', skipPreflight: false, maxRetries: 0 } });
+  if (results.length !== 1 || !(results[0]?.signature instanceof Uint8Array) || results[0].signature.length !== 64) {
+    throw new Error('The wallet did not return a deposit signature. Check its Activity and your trading balance before starting another transfer.');
+  }
+  return bs58.encode(results[0].signature);
 }

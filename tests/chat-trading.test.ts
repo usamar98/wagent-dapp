@@ -64,6 +64,41 @@ beforeAll(async()=>{
 beforeEach(async()=>{vi.unstubAllGlobals();headers['X-Vercel-Forwarded-For']=`198.51.100.${++testIp}`;environment.appUrl='http://localhost:5173';process.env.JUPITER_API_KEY='jupiter-test';process.env.SOLANA_SWAPS_ENABLED='true';delete process.env.SOLANA_CHAT_TRADING_ENABLED;await db.solanaChatTrade.deleteMany({where:{userId}});await db.solanaWalletWithdrawal.deleteMany({where:{userId}});await db.agentCommand.deleteMany({where:{userId}});await db.solanaPermissionChallenge.deleteMany({where:{userId}});await db.solanaTradePermission.deleteMany({where:{userId}});await db.user.update({where:{id:userId},data:{emergencyStop:false}});await db.personalAgentChannel.update({where:{id:channel.id},data:{appUrl:null,tokenFingerprint:'fixture-key-fingerprint',ownerId:'user:owner',enabled:true,leaseToken:'test-lease',leaseUntil:new Date(Date.now()+3600000)}});channelRuntime.clearWebsiteRuntimeCache();});
 afterEach(()=>vi.unstubAllGlobals());afterAll(async()=>{await db?.close();await socket?.stop();await pg?.close();});
 
+describe('owner-wallet SOL funding preparation',()=>{
+  it('requires an authenticated account and a dedicated wallet and rejects recipient overrides',async()=>{
+    expect((await request(app).post('/api/solana/chat-trading/funding/prepare').set(headers).send({amount:'0.1'})).status).toBe(401);
+    expect((await other.post('/api/solana/chat-trading/funding/prepare').set(headers).send({amount:'0.1'})).status).toBe(409);
+    const p=provider();expect((await post('/funding/prepare',{amount:'0.1',to:OTHER})).status).toBe(400);expect(p.mock).not.toHaveBeenCalled();
+    expect((await post('/funding/prepare',{amount:'0.0000000001'})).status).toBe(400);
+  });
+  it('prepares exactly one unsigned owner-to-trading-wallet transfer without moving funds or revoking permission',async()=>{
+    await grant();const p=provider(),response=await post('/funding/prepare',{amount:'0.05'});expect(response.status,JSON.stringify(response.body)).toBe(200);
+    const result=response.body;expect(result.from).toBe(ownerAddress);expect(result.to).toBe(tradingAddress);expect(result.lamports).toBe('50000000');expect(result.feeSol).toBe('0.000005');
+    const decoded=getTransactionDecoder().decode(Buffer.from(result.transaction,'base64')),message=getCompiledTransactionMessageDecoder().decode(decoded.messageBytes);
+    if(message.version===1)throw new Error('A funding transfer must use the supported legacy wire format.');
+    expect(message.staticAccounts).toEqual([ownerAddress,tradingAddress,SYSTEM]);expect(message.instructions).toHaveLength(1);
+    const ix=message.instructions[0];expect(message.staticAccounts[ix.programAddressIndex]).toBe(SYSTEM);expect([...ix.accountIndices!]).toEqual([0,1]);expect(Buffer.from(ix.data!).readUInt32LE()).toBe(2);expect(Buffer.from(ix.data!).readBigUInt64LE(4)).toBe(50000000n);
+    expect(Object.values(decoded.signatures).every(value=>value===null||Buffer.from(value).every(byte=>byte===0))).toBe(true);
+    const {validateSolFundingTransaction}=await import('../src/solana-wallet');expect(validateSolFundingTransaction(result.transaction,ownerAddress,tradingAddress,'0.05')).toHaveLength(215);
+    expect(p.submissions()).toBe(0);expect(p.withdrawals()).toBe(0);expect((await client.get('/api/solana/chat-trading')).body.permission.active).toBe(true);
+    expect(JSON.stringify(result)).not.toMatch(/encryptedSecret|privateKey|secretKey/);
+  });
+  it('refuses insufficient balances, unreliable fees, and failed simulation without broadcasting',async()=>{
+    const p=provider(),base=globalThis.fetch;
+    for(const method of ['getBalance','getFeeForMessage','simulateTransaction']){
+      vi.stubGlobal('fetch',vi.fn(async(url:any,init?:any)=>{const payload=JSON.parse(init?.body||'{}');if(payload.method===method)return Response.json({result:method==='getBalance'?{value:0}:method==='getFeeForMessage'?{value:10000001}:{value:{err:'InsufficientFundsForRent'}}});return base(url,init);}));
+      expect((await post('/funding/prepare',{amount:'0.05'})).status).toBe(method==='getFeeForMessage'?502:400);
+    }
+    expect(p.submissions()).toBe(0);expect(p.withdrawals()).toBe(0);
+  });
+  it('requires the original verified owner and an active session',async()=>{
+    const p=provider();await db.solanaWallet.update({where:{userId},data:{address:OTHER}});
+    try{expect((await post('/funding/prepare',{amount:'0.05'})).status).toBe(409);expect(p.mock).not.toHaveBeenCalled();}
+    finally{await db.solanaWallet.update({where:{userId},data:{address:ownerAddress}});}
+    await db.user.update({where:{id:userId},data:{emergencyStop:true}});expect((await post('/funding/prepare',{amount:'0.05'})).status).toBe(409);
+  });
+});
+
 describe('signed WhatsApp trading permission',()=>{
   it('uses Binance Wallet Standard owner proofs for chat buys, sells, and owner-signed withdrawals',async()=>{
     const {linkWallet,signWalletMessage}=await import('../src/solana-wallet');

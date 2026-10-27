@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { generateKeyPairSync, sign, randomBytes } from 'node:crypto';
 import { getWallets } from '@wallet-standard/app';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import bs58 from 'bs58';
-import { availableWallets, isBinanceWallet, linkWallet, observeWallets, signSwap, signWalletMessage, type SolanaWallet, type WalletAccount } from '../src/solana-wallet';
+import { availableWallets, isBinanceWallet, linkWallet, observeWallets, signSwap, signWalletMessage, fundSolanaWallet, validateSolFundingTransaction, type SolanaWallet, type WalletAccount } from '../src/solana-wallet';
 import { findAccountWallet, signInWithWallet, signedInWalletKind, walletError, type WalletProvider } from '../src/wallet';
 import { SolanaWalletPicker } from '../src/solana-wallet-picker';
 import { api } from '../src/api';
@@ -27,7 +27,7 @@ function fixture(name = 'Binance Wallet', transactions = true) {
 }
 function register(wallet: SolanaWallet) { cleanups.push(getWallets().register(wallet as never)); }
 function browser() {
-  const target = new EventTarget() as EventTarget & { ethereum?: WalletProvider; binancew3w?: { ethereum?: WalletProvider } };
+  const target = new EventTarget() as EventTarget & { ethereum?: WalletProvider; binancew3w?: { ethereum?: WalletProvider }; phantom?: { ethereum?: WalletProvider } };
   const storage = new Map<string, string>();
   vi.stubGlobal('window', target);
   vi.stubGlobal('sessionStorage', { getItem: (key: string) => storage.get(key) || null, setItem: (key: string, value: string) => storage.set(key, value) });
@@ -103,9 +103,45 @@ describe('Binance Solana Wallet Standard connection', () => {
   });
 });
 
+describe('one-time SOL deposits from a connected wallet', () => {
+  function depositFixture() {
+    const f=fixture(),to=fixture().account.address,data=Buffer.alloc(12);data.writeUInt32LE(2);data.writeBigUInt64LE(50000000n,4);
+    const wire=Buffer.concat([Buffer.of(1),Buffer.alloc(64),Buffer.of(1,0,1,3),Buffer.from(f.account.publicKey),Buffer.from(bs58.decode(to)),Buffer.alloc(32),randomBytes(32),Buffer.of(1,2,2,0,1,12),data]);
+    const send=vi.fn(async()=>[{signature:new Uint8Array(64).fill(7)}]);f.account.features=[...f.account.features,'solana:signAndSendTransaction'];f.wallet.features['solana:signAndSendTransaction']={signAndSendTransaction:send};
+    return {f,send,input:{from:f.account.address,to,amount:'0.05',transaction:wire.toString('base64'),expiresAt:new Date(Date.now()+60000).toISOString()},wire};
+  }
+  it('asks Binance or Phantom to approve one mainnet transfer with preflight, and never retries',async()=>{
+    const {f,send,input}=depositFixture();const signature=await fundSolanaWallet(f.wallet,input);expect(bs58.decode(signature)).toHaveLength(64);expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({account:f.account,chain:MAINNET,transaction:Uint8Array.from(Buffer.from(input.transaction,'base64')),options:{preflightCommitment:'confirmed',skipPreflight:false,maxRetries:0}});
+  });
+  it.each(['recipient','amount','program','instruction count','trailing instruction'])('rejects a changed %s before opening a wallet request',async change=>{
+    const {f,send,input,wire}=depositFixture();let modified=Buffer.from(wire);if(change==='recipient')modified[101]^=1;if(change==='amount')modified[207]^=1;if(change==='program')modified[133]=1;if(change==='instruction count')modified[197]=2;if(change==='trailing instruction')modified=Buffer.concat([modified,Buffer.of(0)]);
+    await expect(fundSolanaWallet(f.wallet,{...input,transaction:modified.toString('base64')})).rejects.toThrow('reviewed');expect(send).not.toHaveBeenCalled();
+  });
+  it('rejects stale reviews, wrong owners and excess precision before sending',async()=>{
+    const {f,send,input}=depositFixture();await expect(fundSolanaWallet(f.wallet,{...input,expiresAt:new Date(0).toISOString()})).rejects.toThrow('expired');
+    await expect(fundSolanaWallet(f.wallet,{...input,from:fixture().account.address})).rejects.toThrow('reviewed');
+    expect(()=>validateSolFundingTransaction(input.transaction,input.from,input.to,'0.0000000001')).toThrow('decimal places');expect(send).not.toHaveBeenCalled();
+  });
+  it('propagates cancellation and uncertain wallet responses without another send attempt',async()=>{
+    const {f,send,input}=depositFixture();send.mockRejectedValueOnce(Object.assign(new Error('Cancelled'),{code:4001}));await expect(fundSolanaWallet(f.wallet,input)).rejects.toThrow('Cancelled');expect(send).toHaveBeenCalledTimes(1);
+    send.mockResolvedValueOnce([{signature:new Uint8Array(0)}]);await expect(fundSolanaWallet(f.wallet,input)).rejects.toThrow('Activity');expect(send).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('Binance workspace sign-in', () => {
   const address = '0x1111111111111111111111111111111111111111';
   function provider() { return { request: vi.fn(async ({ method }: { method: string }) => method === 'eth_chainId' ? '0x1' : method === 'personal_sign' ? '0xsignature' : [address]) }; }
+  it('signs into the existing EVM workspace through the scoped Phantom provider',async()=>{
+    const target=browser(),phantom=provider(),binance=provider();target.phantom={ethereum:phantom};target.binancew3w={ethereum:binance};target.ethereum={...binance,isBinance:true};
+    vi.mocked(api).mockResolvedValueOnce({message:'Same Wagent workspace'}).mockResolvedValueOnce({ok:true});await signInWithWallet('phantom');
+    expect(signedInWalletKind()).toBe('phantom');expect(binance.request).not.toHaveBeenCalled();expect(api).toHaveBeenNthCalledWith(1,'/auth/wallet/challenge',{address,chainId:1});
+    expect(phantom.request).toHaveBeenCalledWith({method:'personal_sign',params:['0x'+Buffer.from('Same Wagent workspace').toString('hex'),address]});
+  });
+  it('does not choose Binance or MetaMask when Phantom is missing',async()=>{
+    const target=browser();target.ethereum={...provider(),isMetaMask:true};expect(await findAccountWallet('phantom')).toBeNull();
+    await expect(signInWithWallet('phantom')).rejects.toThrow('Phantom');target.ethereum={...provider(),isPhantom:true};expect(await findAccountWallet('phantom')).toBe(target.ethereum);
+  });
   it('uses the documented Binance namespace even when MetaMask is also installed', async () => {
     const target = browser(), binance = provider(), metamask = provider(); target.binancew3w = { ethereum: binance }; target.ethereum = { ...metamask, isMetaMask: true };
     vi.mocked(api).mockResolvedValueOnce({ message: 'Sign in to Wagent Ai' }).mockResolvedValueOnce({ ok: true });

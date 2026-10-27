@@ -4,17 +4,23 @@
 
 1. Create a private agent with exact token mint addresses and select it in Connections.
 2. Pair your own personal WhatsApp agent. Pairing alone never enables spending.
-3. Open **WhatsApp trading**, select Binance Wallet, Phantom, or Solflare, and verify the original owner Solana wallet. Binance is discovered through its built-in Solana Wallet Standard provider. A wallet that supports message signing can approve chat permissions even if it cannot sign manual swap transactions.
-4. Accept the custody disclosure and create a dedicated trading wallet. Wagent holds its signing key encrypted; the main wallet’s private key is never requested.
-5. Select permitted agent mints, per-trade and UTC daily SOL budgets, network-fee/rent cap, slippage, and a 1-hour to 7-day expiry. Review the complete message and sign with the original owner wallet.
-6. Fund the dedicated address with SOL from your wallet. Only deposited funds are available.
+3. Select **Set up wallet & add SOL** in Connections. The guided flow has three steps: **Connect wallet**, **Add SOL**, and **Approve limits**. Binance Wallet, Phantom, Solflare, and compatible Wallet Standard wallets can verify the original Solana owner account.
+4. Accept the custody disclosure and create a dedicated trading wallet. Wagent holds its signing key encrypted; the main wallet’s private key is never requested. Enter a SOL amount, review the recipient and estimated fee, then approve the one-time deposit in the connected wallet. Alternatively, expand **Transfer from Binance Exchange or another wallet**, copy the address, and send native SOL on Solana mainnet. Balance checks use real RPC data.
+5. Continue to **Approve limits**. Agent mints are initially selected and remain editable before consent; select permitted tokens, per-trade and UTC daily SOL budgets, and expiry. Fee/rent and slippage controls are available in an expandable section, with their current values always summarized. Review the exact complete message and sign with the original owner wallet. A deposit or WhatsApp pairing never grants spending permission.
+6. Setup is complete when WhatsApp is paired, a token agent is selected, the original owner is verified, the trading wallet has SOL, permission is active, and the worker/provider are ready. The page shows missing requirements without inventing balances or permissions. It is possible to approve limits before adding SOL; the funding step stays incomplete until a real balance is detected.
 7. In the paired chat send `Buy 0.01 SOL of <mint>` or `Sell 100 of <mint>`. These commands submit real trades immediately when permission is active. `Check trade` reads confirmation without submitting a new order. Without permission, requests return website review links.
 
 The current chat policy accepts user-paid Metis exact-input v2 routes with one dedicated-wallet signer. Unsupported routers, route layouts, authority changes, unsafe simulations, and routes without verified expiry are blocked. Use the manual Buy & sell flow for unsupported routes. Not every listed token has an executable route.
 
+### Deposit handling
+
+`POST /api/solana/chat-trading/funding/prepare` requires a fresh authenticated session and the verified original owner of the user's dedicated wallet. It accepts only an amount, fixes the recipient to that trading wallet, checks the original owner's SOL balance and fee, simulates exactly one native SOL System transfer, and returns an unsigned transaction with a 60-second review expiry. It does not sign, broadcast, store wallet keys, or revoke existing permissions. No database migration or extra provider/API key is needed.
+
+The browser independently checks the full transfer layout, sole signer, recipient, amount, and absence of extra instructions. The wallet's `solana:signAndSendTransaction` feature shows the one-time approval and handles submission on mainnet with preflight enabled. Wallets without that feature use the copy-address alternative. Funding requests are never automatically retried. A returned signature is shown as submitted, with an explorer link and real balance refresh; an ambiguous wallet response requires checking Activity before starting another transfer. Withdrawals and revocation remain available outside the setup steps.
+
 ## Binance Wallet
 
-Open the website in the Binance Wallet DApp browser or a desktop browser with Binance Wallet Extension installed. Choose **Continue with Binance Wallet** to sign in with its EVM account, then choose **Binance Wallet** in the Solana wallet selector in WhatsApp trading. Existing workspaces belong to their original EVM address; a different address creates a separate workspace, without copying permissions or funds. MetaMask sign-in remains available.
+Open the website in the Binance Wallet DApp browser or a desktop browser with Binance Wallet Extension installed. Choose **Continue with Binance Wallet** to sign in with its EVM account, then choose **Binance Wallet** in the Solana wallet selector in WhatsApp trading. Phantom users can choose **Continue with Phantom** in Phantom's browser or extension, using its documented EVM provider for sign-in and Wallet Standard for the separate Solana owner account. Existing workspaces belong to their original EVM address; a different address creates a separate workspace, without copying permissions or funds. MetaMask sign-in remains available.
 
 Connect the Solana account, approve the ownership message, create the dedicated wallet, fund its displayed Solana mainnet address, and review/sign the spending permission. Binance may require confirmation in its mobile app for keyless-wallet signatures. The same original Solana account signs withdrawals. Never enter a seed phrase or private key on this website.
 
