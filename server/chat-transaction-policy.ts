@@ -40,7 +40,10 @@ export function verifyRouteData(data:Buffer,order:z.infer<typeof orderSchema>,ma
   const start=shared?9:8;check(data.length>=start+26,400,'Malformed Jupiter route.');
   const input=data.readBigUInt64LE(start),quoted=data.readBigUInt64LE(start+8),slippage=data.readUInt16LE(start+16),fee=data.readUInt16LE(start+18);
   check(input===BigInt(order.inAmount)&&slippage<=maxSlippage&&fee<=100,400,'The on-chain route exceeds the approved input, slippage, or 1% provider-fee limit.');
-  const minimum=quoted*BigInt(10000-slippage)/10000n*BigInt(10000-fee)/10000n;
+  // Metis v2 enforces slippage against the net quoted output. Platform fees
+  // are already accounted for; discounting them again rejects valid /order
+  // quotes. Keep the independent fee cap above and net-output simulation below.
+  const minimum=quoted*BigInt(10000-slippage)/10000n;
   check(minimum+1n>=BigInt(order.otherAmountThreshold),400,'The on-chain route does not protect the quoted minimum output.');
   return shared?{authority:1,source:2,destination:5,inputMint:6,outputMint:7}:{authority:0,source:1,destination:2,inputMint:3,outputMint:4};
 }

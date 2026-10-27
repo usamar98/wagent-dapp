@@ -23,17 +23,17 @@ async function grant(change:Record<string,unknown>={}){const proof=await post('/
 async function chat(text:string,id=randomUUID()){return execute(userId,text,'WHATSAPP',id,new Date(),{id:channel.id,ownerId:channel.ownerId,leaseToken:'test-lease'});}
 function tokenData(mint:string,amount:bigint,delegate=0){const data=Buffer.alloc(165);Buffer.from(bs58.decode(mint)).copy(data);Buffer.from(bs58.decode(tradingAddress)).copy(data,32);data.writeBigUInt64LE(amount,64);data.writeUInt32LE(delegate,72);data[108]=1;return {owner:TOKEN,lamports:2039280,executable:false,data:[data.toString('base64'),'base64']};}
 function systemAccount(amount:number){return {owner:SYSTEM,lamports:amount,executable:false,data:['','base64']};}
-function unsigned(side:string,amount:string,out:string,badInput=false,mint=MINT){
+function unsigned(side:string,amount:string,out:string,badInput=false,mint=MINT,feeBps=0,badRouteMinimum=false){
   const addresses=[tradingAddress,source,destination,side==='BUY'?SOL:mint,side==='BUY'?mint:SOL,JUP,TOKEN],data=Buffer.alloc(34);
-  createHash('sha256').update('global:route_v2').digest().subarray(0,8).copy(data);data.writeBigUInt64LE(BigInt(amount)+(badInput?1n:0n),8);data.writeBigUInt64LE(BigInt(out),16);data.writeUInt16LE(100,24);data.writeUInt32LE(1,30);
+  createHash('sha256').update('global:route_v2').digest().subarray(0,8).copy(data);data.writeBigUInt64LE(BigInt(amount)+(badInput?1n:0n),8);data.writeBigUInt64LE(badRouteMinimum?BigInt(out)/2n:BigInt(out),16);data.writeUInt16LE(100,24);data.writeUInt16LE(feeBps,26);data.writeUInt32LE(1,30);
   const accounts=Buffer.from([0,1,2,3,4,6,6,2,5,5]),message=Buffer.concat([Buffer.from([1,0,2,addresses.length]),...addresses.map(a=>Buffer.from(bs58.decode(a))),Buffer.alloc(32),Buffer.from([1,5,accounts.length]),accounts,Buffer.from([data.length]),data]);
   return Buffer.concat([Buffer.from([1]),Buffer.alloc(64),message]).toString('base64');
 }
-function provider(options:{timeout?:boolean;badInput?:boolean;overdraw?:boolean;delegate?:boolean;onOrder?:()=>Promise<void>;onSubmit?:()=>Promise<void>;unknown?:boolean;badMinimum?:boolean;router?:string}={}){
+function provider(options:{timeout?:boolean;badInput?:boolean;overdraw?:boolean;delegate?:boolean;onOrder?:()=>Promise<void>;onSubmit?:()=>Promise<void>;unknown?:boolean;badMinimum?:boolean;badRouteMinimum?:boolean;feeBps?:number;router?:string}={}){
   let submissions=0,withdrawals=0,side='BUY',input='10000000',output='1000000',lastWire='',mint=MINT;const sent:string[]=[];
   const mock=vi.fn(async(url:any,init?:any):Promise<Response>=>{
     if(String(url).includes('/tokens/v2/'))return Response.json([{id:new URL(url).searchParams.get('query'),name:'Fixture',symbol:'TEST',decimals:6}]);
-    if(String(url).includes('/swap/v2/order')){const p=new URL(url).searchParams;side=p.get('inputMint')===SOL?'BUY':'SELL';mint=p.get(side==='BUY'?'outputMint':'inputMint')!;input=p.get('amount')!;output=side==='BUY'?'1000000':'10000000';lastWire=unsigned(side,input,output,options.badInput,mint);if(options.onOrder)await options.onOrder();return Response.json({requestId:randomUUID(),transaction:lastWire,inputMint:p.get('inputMint'),outputMint:p.get('outputMint'),inAmount:input,outAmount:output,otherAmountThreshold:String(BigInt(output)*99n/100n),router:options.router??'metis',slippageBps:100,lastValidBlockHeight:'100',signatureFeePayer:tradingAddress});}
+    if(String(url).includes('/swap/v2/order')){const p=new URL(url).searchParams;side=p.get('inputMint')===SOL?'BUY':'SELL';mint=p.get(side==='BUY'?'outputMint':'inputMint')!;input=p.get('amount')!;output=side==='BUY'?'1000000':'10000000';lastWire=unsigned(side,input,output,options.badInput,mint,options.feeBps,options.badRouteMinimum);if(options.onOrder)await options.onOrder();return Response.json({requestId:randomUUID(),transaction:lastWire,inputMint:p.get('inputMint'),outputMint:p.get('outputMint'),inAmount:input,outAmount:output,otherAmountThreshold:String(BigInt(output)*99n/100n),router:options.router??'metis',slippageBps:100,feeBps:options.feeBps??0,feeMint:SOL,lastValidBlockHeight:'100',signatureFeePayer:tradingAddress});}
     if(String(url).includes('/swap/v2/execute')){submissions++;const signed=JSON.parse(init.body).signedTransaction,tx=getTransactionDecoder().decode(Buffer.from(signed,'base64'));const {validateSignedSwap}=await import('../server/solana-swaps.js');const signature=validateSignedSwap(lastWire,signed,tradingAddress);expect(Object.keys(tx.signatures)).toEqual([tradingAddress]);sent.push(signed);if(options.onSubmit)await options.onSubmit();if(options.timeout)throw new Error('timeout');return Response.json({status:'Success',code:0,signature});}
     const payload=JSON.parse(init?.body||'{}'),method=payload.method;
     if(method==='getMultipleAccounts')return Response.json({result:{context:{slot:100},value:payload.params[0].map((a:string)=>a===tradingAddress?systemAccount(1000000000):a===source?tokenData(side==='BUY'?SOL:mint,side==='BUY'?0n:100000000n):a===destination?tokenData(side==='BUY'?mint:SOL,0n):{owner:SYSTEM,lamports:0,executable:false,data:['','base64']})}});
@@ -296,7 +296,37 @@ describe('explicit any-Solana-token permission',()=>{
   });
 });
 
+describe('Metis v2 minimum-output decoding',()=>{
+  it.each(['route_v2','shared_accounts_route_v2'])('protects the fee-inclusive net minimum for %s',async name=>{
+    const {verifyRouteData}=await import('../server/chat-transaction-policy.js');
+    const shared=name==='shared_accounts_route_v2',start=shared?9:8,data=Buffer.alloc(start+26);
+    createHash('sha256').update(`global:${name}`).digest().subarray(0,8).copy(data);
+    // Production /order regression: 67.101857 SI, 1% slippage, 0.1% fee.
+    // The encoded output is net; its minimum is 66.430838, not 66.364407.
+    data.writeBigUInt64LE(1000000n,start);data.writeBigUInt64LE(67101857n,start+8);data.writeUInt16LE(100,start+16);
+    const order={requestId:'regression',transaction:'unused',inputMint:SOL,outputMint:MINT,inAmount:'1000000',outAmount:'67101857',otherAmountThreshold:'66430838',router:'metis'};
+    for(const fee of [0,10,100]){
+      data.writeUInt16LE(fee,start+18);
+      expect(verifyRouteData(data,order,100)).toEqual(shared?{authority:1,source:2,destination:5,inputMint:6,outputMint:7}:{authority:0,source:1,destination:2,inputMint:3,outputMint:4});
+      expect(()=>verifyRouteData(data,{...order,otherAmountThreshold:'66430840'},100)).toThrow('minimum output');
+    }
+    data.writeUInt16LE(101,start+18);expect(()=>verifyRouteData(data,order,100)).toThrow('provider-fee limit');
+    data.writeUInt16LE(10,start+18);expect(()=>verifyRouteData(data,order,99)).toThrow('slippage');
+    expect(()=>verifyRouteData(data,{...order,inAmount:'1000001'},100)).toThrow('approved input');
+  });
+});
+
 describe('budgeted Jupiter chat execution',()=>{
+  it.each(['BUY','SELL'])('accepts fee-inclusive %s quotes without discounting the net minimum twice',async side=>{
+    await grant(anyTokens);const p=provider({feeBps:10});
+    const result=await chat(side==='BUY'?`Buy 0.001 SOL of ${OTHER}`:`Sell 2.5 of ${OTHER}`);
+    expect(result.command.reply).toContain('TRADE CONFIRMED');expect(p.submissions()).toBe(1);
+  });
+  it.each([{feeBps:101},{feeBps:10,badRouteMinimum:true},{feeBps:10,badMinimum:true},{feeBps:10,overdraw:true}])('keeps fee, encoded-minimum and simulation guards on fee-inclusive routes %j',async options=>{
+    await grant(anyTokens);const p=provider(options);
+    expect((await chat(`Buy 0.001 SOL of ${OTHER}`)).command.reply).toContain('NOT EXECUTED');expect(p.submissions()).toBe(0);
+    expect((await db.solanaChatTrade.findFirst({where:{userId}})).signature).toBeNull();
+  });
   it('buys directly from the dedicated wallet and verifies the server-created signature',async()=>{
     await grant();const p=provider(),result=await chat(`Buy 0.01 SOL of ${MINT}`);expect(result.command.reply,JSON.stringify(result)).toContain('TRADE CONFIRMED');expect(result.command.reply).not.toContain('localhost');expect(p.submissions()).toBe(1);const trade=await db.solanaChatTrade.findFirst({where:{userId}});expect(trade.budgetLamports).toBe('11000000');expect(trade.walletAddress).toBe(tradingAddress);expect(trade.walletAddress).not.toBe(ownerAddress);
   });
