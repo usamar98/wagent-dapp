@@ -9,6 +9,8 @@ People create a private Solana token agent and pair their own personal WhatsApp 
 ## Product Purpose
 Build a Solana agent and connect its conversation. Available now: private agents, WhatsApp ownership pairing, DEX Screener discovery, private watchlists, wallet-approved Jupiter swaps, optional permissioned WhatsApp trading with budgets/expiry/revoke and owner-signed withdrawals, and configurable discovery/price/liquidity alerts using DEX Screener. Dedicated-wallet keys are held encrypted by the service; limits are application-enforced and must never be described as on-chain delegation. Missing provider keys show setup required. Background alerts and WhatsApp commands require a persistent worker. Without active permission, chat buy/sell requests produce website review links. Exit automation and the marketplace remain Coming soon. DEXTools, Coinbase, and Birdeye are not used. Old records are preserved; isolated demos retain paper execution.
 
+Production polling uses Supabase Cron to invoke a protected Vercel worker every 10 seconds, independently of the owner's computer. A fenced database lease coordinates overlapping invocations and bounded batches preserve existing per-command and permission checks. Hosting/provider availability and account quotas still apply. Local polling is an optional development/standalone alternative.
+
 ## Brand Personality
 Calm, precise, independent. A useful marketplace with credible detail and no profitability promises.
 

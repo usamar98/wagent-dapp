@@ -71,7 +71,7 @@ export async function checkAlert(rule:Rule){
     });
   }catch(error){await db.solanaAlertRule.updateMany({where:{id:rule.id,userId:rule.userId},data:{lastCheckedAt:new Date(),lastError:error instanceof AppError?error.message:'Alert data could not be checked. No trade was placed.'}});}
 }
-export async function tickSolanaAlerts(userId?:string){
+export async function tickSolanaAlerts(userId?:string,options:{limit?:number;deadline?:number}={}){
   if(!providerStatus().alertsEnabled)return;
   // A persisted lease coordinates web checks and background workers without holding a DB transaction across HTTP.
   const lease=token(),key='solana:alert-worker';
@@ -83,9 +83,9 @@ export async function tickSolanaAlerts(userId?:string){
   });
   if(!claimed)return;
   try{
-    const due=userId?await db.solanaAlertRule.findMany({where:{userId,enabled:true},take:20}):await db.sql<{id:string}>`SELECT id FROM "SolanaAlertRule" WHERE enabled=true AND ("lastCheckedAt" IS NULL OR "lastCheckedAt" < ${new Date(Date.now()-60000)}) ORDER BY "lastCheckedAt" ASC NULLS FIRST LIMIT 20`;
+    const due=userId?await db.solanaAlertRule.findMany({where:{userId,enabled:true},take:options.limit??20}):await db.sql<{id:string}>`SELECT id FROM "SolanaAlertRule" WHERE enabled=true AND ("lastCheckedAt" IS NULL OR "lastCheckedAt" < ${new Date(Date.now()-60000)}) ORDER BY "lastCheckedAt" ASC NULLS FIRST LIMIT ${options.limit??20}`;
     const rules=userId?due as Rule[]:await db.solanaAlertRule.findMany({where:{id:{in:due.map(r=>r.id)}}});
-    for(let i=0;i<rules.length;i+=4)await Promise.allSettled(rules.slice(i,i+4).map(checkAlert));
+    for(let i=0;i<rules.length;i+=4){if(Date.now()>=(options.deadline??Infinity))break;await Promise.allSettled(rules.slice(i,i+4).map(checkAlert));}
   }finally{
     await transaction(async tx=>{await tx.sql`SELECT pg_advisory_xact_lock(870261)`;const saved=await tx.setting.findUnique({where:{key}});if(saved){const state=JSON.parse(saved.value);if(state.token===lease)await tx.setting.update({where:{key},data:{value:JSON.stringify({...state,until:0})}});}});
   }

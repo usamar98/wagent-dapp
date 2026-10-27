@@ -24,11 +24,14 @@ import { solanaPermissionsRouter, revokeTrading } from './solana-permissions.js'
 import { chatExecutionRouter } from './solana-chat-trading.js';
 import { solanaWithdrawalRouter } from './solana-withdrawals.js';
 import { solanaFundingRouter } from './solana-funding.js';
+import { cloudWorkerRouter } from './cloud-worker.js';
 
 export const app=express();
 app.disable('x-powered-by');
 app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],imgSrc:["'self'",'https:','data:'],connectSrc:["'self'"],objectSrc:["'none'"],upgradeInsecureRequests:env.production?[]:null}},strictTransportSecurity:env.production?undefined:false}));
 app.use('/api',rateLimit({windowMs:60000,limit:300,keyGenerator:rateLimitKey,standardHeaders:'draft-8',legacyHeaders:false}));
+// Uses its own service credential, before browser session and CSRF middleware.
+app.use('/api/internal/worker', cloudWorkerRouter);
 app.post('/api/webhooks/stripe',express.raw({type:'application/json',limit:'256kb'}),async(req,res)=>{await handleStripeWebhook(req.body,req.get('stripe-signature')||'');res.json({received:true});});
 app.get('/api/webhooks/whatsapp',(req,res)=>{check(process.env.META_VERIFY_TOKEN && req.query['hub.verify_token']===process.env.META_VERIFY_TOKEN && req.query['hub.mode']==='subscribe',403,'Webhook verification failed');res.type('text').send(String(req.query['hub.challenge']));});
 app.post('/api/webhooks/whatsapp',express.raw({type:'application/json',limit:'256kb'}),async(req,res)=>{

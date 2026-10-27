@@ -7,6 +7,7 @@ A Solana-only agent workspace. Create a private token configuration, pair your p
 - MetaMask, Binance Wallet, or Phantom message sign-in for EVM workspace identity. Verify the separate Solana owner account in Binance Wallet, Phantom, Solflare, or another compatible Wallet Standard wallet for trading. No Binance API key is needed.
 - Private agent creation with 1–10 Solana token mints.
 - Agent selection, encrypted personal WhatsApp keys, one-time ownership pairing, manual sync, and background polling.
+- Cloud WhatsApp and alert polling using Supabase Cron and a protected Vercel worker, independent of the owner's computer. See [cloud worker setup and operations](docs/CLOUD-WORKER.md).
 - Real Solana token discovery and mint search from DEX Screener, refreshed every 60 seconds.
 - Liquidity filtering, pool age, volume, mint copying, and direct DEX Screener research links.
 - Private account-scoped watchlists stored in Supabase, with up to 30 mints.
@@ -35,7 +36,7 @@ npm run db:migrate:supabase
 npm run dev
 ```
 
-Open http://localhost:5173. The API uses port 4000. The launcher starts the API, Vite, and the worker against Supabase without seeding hosted data. Keep the worker on a persistent host for automatic message polling. A Vercel website deployment alone does not keep that process alive.
+Open http://localhost:5173. The API uses port 4000. The launcher starts the API, Vite, and a local worker against Supabase without seeding hosted data. Once the [cloud schedule](docs/CLOUD-WORKER.md) is enabled, use `npm run dev:supabase` for local development without a duplicate polling process. Production polling runs on Supabase + Vercel while your computer is off; a website deployment without the enabled schedule does not poll chats.
 
 Core environment: DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY, APP_URL, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test. Only DATABASE_URL is used, with verified TLS and the included public Supabase CA. Add JUPITER_API_KEY and SOLANA_SWAPS_ENABLED=true for swaps. DEX Screener needs no key. Birdeye, Coinbase, and AI keys are not used. Each user supplies their personal WhatsApp agent key in Connections. See [provider setup and exact Vercel variables](docs/SOLANA-PROVIDERS.md).
 

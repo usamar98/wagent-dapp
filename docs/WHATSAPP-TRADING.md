@@ -51,7 +51,7 @@ No additional API service or shared signing key is required. Keep the verified `
 
 `SOLANA_CHAT_TRADING_ENABLED=false` is an optional server-wide kill switch. Otherwise chat trading is available when Jupiter swaps are enabled; each user still needs a signed grant. There is no default spending permission for existing users.
 
-The persistent worker still polls WhatsApp. For a production channel, it dispatches the saved command to that production website with a short-lived HMAC using the existing per-user WhatsApp credential. The website checks the live lease, paired owner, stored command, and origin before execution. The Jupiter API key stays on the website API and is not required on a shared local polling worker. Vercel alone does not keep the polling worker alive.
+The [cloud worker](CLOUD-WORKER.md) polls WhatsApp through a protected production Vercel endpoint, scheduled every 10 seconds by Supabase Cron. It works with your computer off. A standalone local worker is also supported: for a production channel, it dispatches the saved command to that production website with a short-lived HMAC using the existing per-user WhatsApp credential. The website checks the live lease, paired owner, stored command, and origin before execution. The Jupiter API key stays on the website API and is not required on a shared local polling worker. Enable the cloud schedule separately after deploying; the website alone does not start it.
 
 Apply `20261026172252_whatsapp_trading_permissions.sql` before deploying the API. It adds five RLS-enabled backend-only tables without changing existing customer records. No funds should be moved as part of deployment or automated testing.
 

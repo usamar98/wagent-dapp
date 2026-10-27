@@ -171,9 +171,11 @@ personalWhatsAppRouter.post('/disconnect', async (req, res) => {
   res.json({ ok: true });
 });
 
-export async function tickPersonalAgents() {
-  const channels = await db.personalAgentChannel.findMany({ where: { enabled: true, nextPollAt: { lte: new Date() } }, select: { userId: true }, take: 50 });
+export async function tickPersonalAgents(options: { limit?: number; deadline?: number } = {}) {
+  const now = new Date();
+  const channels = await db.personalAgentChannel.findMany({ where: { enabled: true, nextPollAt: { lte: now }, OR: [{ leaseUntil: null }, { leaseUntil: { lte: now } }] }, select: { userId: true }, orderBy: { nextPollAt: 'asc' }, take: options.limit ?? 50 });
   for (let start = 0; start < channels.length; start += 4) {
+    if (Date.now() >= (options.deadline ?? Infinity)) break;
     await Promise.allSettled(channels.slice(start, start + 4).map(channel => syncPersonalAgent(channel.userId)));
   }
 }
