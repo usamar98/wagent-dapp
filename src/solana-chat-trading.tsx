@@ -6,13 +6,14 @@ import { availableWallets, observeWallets, linkWallet, signWalletMessage, wallet
 import { SolanaWalletPicker } from './solana-wallet-picker';
 import { walletError } from './wallet';
 import { TradingFunding, type TradingBalance } from './solana-chat-funding';
+import { ChatTradingAgentSetup, type ChatAgentSetup } from './solana-chat-agent-setup';
 import { LoadingRows, Notice, PageHeading, SolMark, useResource } from './solana-ui';
 import s from './solana.module.css';
 
 const SOL='So11111111111111111111111111111111111111112';
 type Proof={id:string;address:string;message:string};
 type HistoryItem={id:string;status:string;side?:string;mint:string;amount:string;signature:string|null;error:string|null;createdAt:string};
-type State={wallet:{address:string;ownerAddress:string}|null;permission:{active:boolean;perTradeSol:string;dailySol:string;maxFeeSol:string;slippageBps:number;allowedMints:string[];expiresAt:string;revokedAt:string|null;revokeReason:string|null}|null;availableMints:string[];paired:boolean;workerOnline:boolean;usedTodaySol:string;enabled:boolean;trades:HistoryItem[];withdrawals:HistoryItem[]};
+type State={wallet:{address:string;ownerAddress:string}|null;permission:{active:boolean;perTradeSol:string;dailySol:string;maxFeeSol:string;slippageBps:number;allowedMints:string[];expiresAt:string;revokedAt:string|null;revokeReason:string|null}|null;availableMints:string[];agentSetup:ChatAgentSetup;paired:boolean;workerOnline:boolean;usedTodaySol:string;enabled:boolean;trades:HistoryItem[];withdrawals:HistoryItem[]};
 export default function ChatTrading(){
   const state=useResource<State>('/solana/chat-trading',true,15000),owner=useResource<{wallet:{address:string}|null}>('/solana/swaps');
   const [wallets,setWallets]=useState<SolanaWallet[]>([]),[selected,setSelected]=useState(''),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -36,19 +37,21 @@ export default function ChatTrading(){
     {(error||state.error||owner.error)&&<Notice error>{error||state.error||owner.error}</Notice>}{notice&&<Notice>{notice}</Notice>}
     {!data?<LoadingRows/>:<>
     {!data.enabled&&<Notice>Chat trading needs Jupiter swaps enabled on the website. You can review your setup and revoke existing permissions here.</Notice>}
-    <div className={s.setupConnectionState}><span className={prerequisites?s.available:s.soon}>{prerequisites?'Agent selected · WhatsApp paired':'Finish your agent and WhatsApp connection'}</span>{prerequisites&&!data.workerOnline&&<span>Worker offline. <Link to="/connections">Check messages manually</Link>.</span>}</div>
-    {!prerequisites&&<Notice><Link to="/connections">Choose your agent and connect WhatsApp <ArrowRight size={13}/></Link>. Your agent needs at least one token mint other than native SOL.</Notice>}
+    <div className={s.setupConnectionState}><span className={data.paired?s.available:s.soon}>{data.paired?'WhatsApp paired':'WhatsApp pairing required'}</span><span className={data.availableMints.length?s.available:s.soon}>{data.availableMints.length?'Token agent selected':data.agentSetup?.selectedVersionId?'Agent needs a token mint':'Select a token agent'}</span>{data.paired&&!data.workerOnline&&<span>Worker offline. <Link to="/connections">Check messages manually</Link>.</span>}</div>
+    {!data.availableMints.length&&data.agentSetup&&<ChatTradingAgentSetup setup={data.agentSetup} paired={data.paired} busy={!!busy} onSave={(versionId,mints)=>act('agent',async()=>{await api('/solana/chat-trading/agent',{versionId,mints});setMints(null);setStep(null);setNotice('Agent selected. Continue with the remaining setup steps below.');})}/>}
+    {!data.paired&&data.availableMints.length>0&&<section className={s.setupPrerequisites}><h2>Pair WhatsApp to continue</h2><p>Your token agent is selected. Finish the chat pairing before adding a trading wallet.</p><Link className={s.button} to="/connections">Finish WhatsApp pairing <ArrowRight size={14}/></Link></section>}
     {complete&&<div className={s.setupReady} role="status"><Check size={20}/><div><h2>Your WhatsApp trading setup is complete.</h2><p>Send a buy or sell command in your paired agent chat. Each supported trade must fit your signed limits.</p></div></div>}
     <ol className={s.setupPath} aria-label="WhatsApp trading setup">{([{id:1,title:'Connect wallet',done:ownerReady},{id:2,title:'Add SOL',done:funded},{id:3,title:'Approve limits',done:!!data.permission?.active}] as const).map(item=><li key={item.id}><button aria-current={currentStep===item.id?'step':undefined} disabled={!!busy||(item.id>1&&(!ownerReady||!prerequisites))||(item.id===3&&!data.wallet)} onClick={()=>setStep(item.id)}><span>{item.done?<Check size={16}/>:item.id}</span><strong>{item.title}</strong><small>{item.done?'Done':currentStep===item.id?'Current step':'Next'}</small></button></li>)}</ol>
     <div className={s.permissionLayout}><div>
       {currentStep===1&&<>
-      <section className={s.connectionSection}><div className={s.formTitle}><span>01</span><div><h2>Verify your owner wallet</h2><p>This Solana wallet signs the permission and receives withdrawals.</p></div></div>
+      <section className={s.connectionSection}><div className={s.formTitle}><span>01</span><div><h2>{ownerReady?'Owner wallet verified':'Verify your owner wallet'}</h2><p>{ownerReady?'This step is complete. You do not need to connect the wallet again to continue.':'This Solana wallet signs the permission and receives withdrawals.'}</p></div></div>
       {owner.data?.wallet&&<p className={s.walletAddress}>{owner.data.wallet.address}</p>}
+      <details className={s.setupDetails} open={!ownerReady}><summary>{ownerReady?'Choose or reverify a wallet app':'Connect your wallet app'}</summary>
       <SolanaWalletPicker wallets={wallets} selected={wallet} disabled={!!busy} onChange={name=>{setSelected(name);setProof(null);setWithdrawProof(null);}}/>
       {wallet&&<button className={s.button} disabled={!!busy} onClick={()=>void act('link',async()=>{await linkWallet(wallet);setProof(null);setStep(2);setNotice(`${walletLabel(wallet)} Solana owner wallet verified.`);})}>{busy==='link'?'Check your wallet…':`${owner.data?.wallet?'Verify':'Connect'} ${walletLabel(wallet)}`}</button>}
       <p className={s.fine}>This signs an ownership message. It moves no funds and grants no trading access. Keep this same Solana account for withdrawals.</p>
-      {ownerReady&&<button className={s.textLink} disabled={!prerequisites||!!busy} onClick={()=>setStep(2)}>Continue to add SOL <ArrowRight size={14}/></button>}
-      {!data.paired||!data.availableMints.length?<Notice>Select your private agent and pair WhatsApp in <Link to="/connections">Connections</Link>. The selected agent needs at least one exact token mint.</Notice>:<p className={s.serviceState}><Check size={14}/>WhatsApp paired · {data.availableMints.length} token mint{data.availableMints.length===1?'':'s'} available</p>}</section>
+      </details>
+      {ownerReady&&(prerequisites?<button className={s.button} disabled={!!busy} onClick={()=>setStep(2)}>Continue to add SOL <ArrowRight size={14}/></button>:<p className={s.fine}>{!data.availableMints.length?'Save and select a token agent above to unlock Add SOL.':'Finish WhatsApp pairing to unlock Add SOL.'}</p>)}</section>
       </>}
       {currentStep===2&&<section className={s.connectionSection}><div className={s.formTitle}><span>02</span><div><h2>Add SOL for WhatsApp trading</h2><p>Only the funds in this separate trading wallet can be used by your chat.</p></div></div>
       <p className={s.permissionDisclosure}>Wagent Ai holds this wallet’s encrypted signing key. Spending limits are enforced by the app, rather than an on-chain spending contract. A compromise of the service or encryption key could put deposited funds at risk.</p>

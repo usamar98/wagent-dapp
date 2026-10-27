@@ -53,6 +53,10 @@ function validAccount(account: WalletAccount, feature: string) {
     account.publicKey instanceof Uint8Array && account.publicKey.length === 32 && bs58.encode(account.publicKey) === account.address;
 }
 async function connectAccount(wallet: SolanaWallet, feature: string, address?: string) {
+  // An already-authorized account can sign without repeating the connection handshake.
+  // Only reuse the exact expected owner, with the required mainnet feature.
+  const existing = address ? wallet.accounts.find(a => a.address === address && validAccount(a, feature)) : undefined;
+  if (existing) return existing;
   const connect = wallet.features['standard:connect'];
   if (!connect) throw new Error('This wallet cannot connect. Reopen the website in your Solana wallet browser.');
   const result = await connect.connect();

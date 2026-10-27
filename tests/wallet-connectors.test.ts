@@ -70,6 +70,16 @@ describe('Binance Solana Wallet Standard connection', () => {
     const f = fixture(), other = fixture();
     await expect(signWalletMessage(f.wallet, other.account.address, 'Permission')).rejects.toThrow('original owner'); expect(f.message).not.toHaveBeenCalled();
   });
+  it('uses the already-authorized exact owner when a repeated MetaMask connection handshake would fail',async()=>{
+    const f=fixture('MetaMask');vi.mocked(f.wallet.features['standard:connect']!.connect).mockRejectedValueOnce(new Error('Failed to connect to MetaMask'));
+    const signature=await signWalletMessage(f.wallet,f.account.address,'Fresh reviewed permission');
+    expect(Buffer.from(signature,'base64')).toHaveLength(64);expect(f.message).toHaveBeenCalledTimes(1);expect(f.wallet.features['standard:connect']!.connect).not.toHaveBeenCalled();
+  });
+  it('connects again when the expected account is not already authorized and never falls back to another account',async()=>{
+    const f=fixture('MetaMask'),other=fixture();f.wallet.accounts=[other.account];
+    await expect(signWalletMessage(f.wallet,f.account.address,'Fresh reviewed permission')).rejects.toThrow('original owner');
+    expect(f.wallet.features['standard:connect']!.connect).toHaveBeenCalledTimes(1);expect(f.message).not.toHaveBeenCalled();
+  });
   it('rejects a mainnet account without message support and a mismatched public key', async () => {
     const f = fixture(); f.account.features = ['solana:signTransaction'];
     await expect(linkWallet(f.wallet)).rejects.toThrow('message signing');

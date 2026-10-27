@@ -71,21 +71,49 @@ solanaPermissionsRouter.use(rateLimit({ windowMs: 60000, limit: 45, keyGenerator
 solanaPermissionsRouter.use((_req,res,next) => { res.set('Cache-Control','no-store'); next(); });
 solanaPermissionsRouter.get('/chat-trading', async (req,res) => {
   const userId = req.user!.id;
-  const [wallet, permission, trades, withdrawals, channel, workspace, linked, worker] = await Promise.all([
+  const [wallet, permission, trades, withdrawals, channel, workspace, linked, worker, versions] = await Promise.all([
     db.solanaTradingWallet.findUnique({ where: { userId }, select: { address: true, ownerAddress: true, createdAt: true } }),
     db.solanaTradePermission.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } }),
     db.solanaChatTrade.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 30 }),
     db.solanaWalletWithdrawal.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 10 }),
     db.personalAgentChannel.findUnique({ where: { userId }, select: { id: true, appUrl: true, ownerId: true, enabled: true, tokenFingerprint: true, createdAt: true } }),
     db.tradingWorkspace.findUnique({ where: { userId } }), db.solanaWallet.findUnique({ where: { userId } }), db.setting.findUnique({ where: { key: 'workerHeartbeat' } }),
+    db.agentVersion.findMany({ where: { agent: { creatorId: userId } }, include: { agent: true }, orderBy: { createdAt: 'desc' }, take: 100 }),
   ]);
-  const instance = workspace?.activeInstanceId ? await db.instance.findFirst({ where: { id: workspace.activeInstanceId, userId }, include: { version: true } }) : null;
-  const config = instance ? configSchema.safeParse(instance.version.config) : null;
+  const instance = workspace?.activeInstanceId ? await db.instance.findFirst({ where: { id: workspace.activeInstanceId, userId }, include: { version: { include: { agent: true } } } }) : null;
+  const config = instance?.version.agent.creatorId === userId ? configSchema.safeParse(instance.version.config) : null;
   const availableMints = config?.success ? config.data.symbols.filter(m => addressSchema.safeParse(m).success && m !== SOL_MINT) : [];
+  const agents = versions.flatMap(version => { const parsed = configSchema.safeParse(version.config); return parsed.success ? [{ id: version.id, name: version.agent.name, number: version.number, mints: parsed.data.symbols.filter(m => addressSchema.safeParse(m).success && m !== SOL_MINT) }] : []; });
+  const agentSetup = { selectedVersionId: config?.success ? instance!.versionId : null, agents };
   const sameWebsite=channel?await channelOrigin(db,channel)===websiteOrigin(env.appUrl):false;
   const active = !!permission && sameWebsite && consentWebsite(permission.consentMessage,env.appUrl) && !permission.revokedAt && permission.expiresAt > new Date() && !req.user!.emergencyStop && linked?.address === wallet?.ownerAddress && !!channel?.enabled && permission.channelId === channel.id && permission.channelFingerprint === channel.tokenFingerprint && permission.channelOwnerId === channel.ownerId && channel.createdAt <= permission.createdAt && permission.instanceId === instance?.id && permission.allowedMints.every(m => availableMints.includes(m));
   const used = await dailyTradingUsage(db,userId);
-  res.json({ wallet, permission: permission ? { id: permission.id, active, allowedMints: permission.allowedMints, perTradeSol: humanAmount(permission.perTradeLamports,9), dailySol: humanAmount(permission.dailyLamports,9), maxFeeSol: humanAmount(permission.maxFeeLamports,9), slippageBps: permission.slippageBps, expiresAt: permission.expiresAt, revokedAt: permission.revokedAt, revokeReason: permission.revokeReason } : null, availableMints, paired: !!channel?.ownerId && channel.enabled, usedTodaySol: humanAmount(used.toString(),9), trades, withdrawals, workerOnline: !!worker && Date.now() - Number(worker.value) < 30000, enabled: chatTradingEnabled() });
+  res.json({ wallet, permission: permission ? { id: permission.id, active, allowedMints: permission.allowedMints, perTradeSol: humanAmount(permission.perTradeLamports,9), dailySol: humanAmount(permission.dailyLamports,9), maxFeeSol: humanAmount(permission.maxFeeLamports,9), slippageBps: permission.slippageBps, expiresAt: permission.expiresAt, revokedAt: permission.revokedAt, revokeReason: permission.revokeReason } : null, availableMints, agentSetup, paired: !!channel?.ownerId && channel.enabled, usedTodaySol: humanAmount(used.toString(),9), trades, withdrawals, workerOnline: !!worker && Date.now() - Number(worker.value) < 30000, enabled: chatTradingEnabled() });
+});
+solanaPermissionsRouter.post('/chat-trading/agent', async (req,res) => {
+  const input = z.object({ versionId: z.uuid(), mints: z.array(addressSchema.refine(m => m !== SOL_MINT, 'SOL funds the wallet. Choose a token mint to trade.')).min(1).max(10).refine(m => new Set(m).size === m.length, 'Token mints must be unique.') }).strict().parse(req.body);
+  const result = await transaction(async tx => {
+    const userId = await permissionSession(tx,req,true);
+    const version = await tx.agentVersion.findFirst({ where: { id: input.versionId, agent: { creatorId: userId } } });
+    check(version,404,'Choose a private agent you created.');
+    const parsed = configSchema.safeParse(version.config);
+    check(parsed.success,409,'This older configuration needs a new Solana agent.');
+    let versionId = version.id;
+    if (JSON.stringify(parsed.data.symbols) !== JSON.stringify(input.mints)) {
+      const latest = await tx.agentVersion.findFirst({ where: { agentId: version.agentId }, orderBy: { number: 'desc' } });
+      const next = await tx.agentVersion.create({ data: { agentId: version.agentId, number: (latest?.number || 0) + 1, config: { ...parsed.data, symbols: input.mints }, priceCents: version.priceCents, setupInstructions: version.setupInstructions } });
+      versionId = next.id;
+    }
+    const workspace = await tx.tradingWorkspace.upsert({ where: { userId }, create: { userId }, update: {} });
+    const instance = await tx.instance.upsert({ where: { userId_versionId: { userId, versionId } }, create: { userId, versionId }, update: {} });
+    if (workspace.activeInstanceId !== instance.id) {
+      await tx.tradeIntent.updateMany({ where: { userId, status: 'PENDING' }, data: { status: 'CANCELLED' } });
+      await revokeTrading(tx,userId,'Changing the selected agent revoked chat trading permission.');
+      await tx.tradingWorkspace.update({ where: { userId }, data: { activeInstanceId: instance.id } });
+    }
+    return { versionId };
+  });
+  res.json(result);
 });
 solanaPermissionsRouter.post('/chat-trading/wallet', async (req,res) => {
   z.object({ consent: z.literal(true) }).strict().parse(req.body);

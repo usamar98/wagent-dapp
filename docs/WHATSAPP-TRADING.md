@@ -12,6 +12,14 @@
 
 The current chat policy accepts user-paid Metis exact-input v2 routes with one dedicated-wallet signer. Unsupported routers, route layouts, authority changes, unsafe simulations, and routes without verified expiry are blocked. Use the manual Buy & sell flow for unsupported routes. Not every listed token has an executable route.
 
+### If Connect wallet says Done but Add SOL is locked
+
+Wallet verification, WhatsApp pairing, and agent selection are separate requirements. A verified wallet does not need another connection prompt just to continue. Check the two setup status labels on the WhatsApp trading page. If no token agent is selected, choose a saved private agent there, enter the exact mint addresses of tokens you want to trade, and select **Save tokens & use agent**. SOL is the funding currency; a list containing only native/wrapped SOL cannot enable buying another token.
+
+Saving a changed token list creates a new immutable version and selects it in one transaction. The old version, original Solana owner, and WhatsApp pairing are preserved. A changed agent revokes previous trading permission; this action never authorizes a trade or transfers funds. A missing WhatsApp pairing instead links directly to Connections. The builder also explains the token requirement and rejects a SOL-only trading configuration.
+
+Wallet actions reuse an already-authorized exact owner account when it supports the required Solana mainnet feature. Accounts that are missing or changed still require a connection. Every permission, withdrawal, and deposit retains its own signature/approval and exact-account checks.
+
 ### Deposit handling
 
 `POST /api/solana/chat-trading/funding/prepare` requires a fresh authenticated session and the verified original owner of the user's dedicated wallet. It accepts only an amount, fixes the recipient to that trading wallet, checks the original owner's SOL balance and fee, simulates exactly one native SOL System transfer, and returns an unsigned transaction with a 60-second review expiry. It does not sign, broadcast, store wallet keys, or revoke existing permissions. No database migration or extra provider/API key is needed.

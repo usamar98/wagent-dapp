@@ -64,6 +64,70 @@ beforeAll(async()=>{
 beforeEach(async()=>{vi.unstubAllGlobals();headers['X-Vercel-Forwarded-For']=`198.51.100.${++testIp}`;environment.appUrl='http://localhost:5173';process.env.JUPITER_API_KEY='jupiter-test';process.env.SOLANA_SWAPS_ENABLED='true';delete process.env.SOLANA_CHAT_TRADING_ENABLED;await db.solanaChatTrade.deleteMany({where:{userId}});await db.solanaWalletWithdrawal.deleteMany({where:{userId}});await db.agentCommand.deleteMany({where:{userId}});await db.solanaPermissionChallenge.deleteMany({where:{userId}});await db.solanaTradePermission.deleteMany({where:{userId}});await db.user.update({where:{id:userId},data:{emergencyStop:false}});await db.personalAgentChannel.update({where:{id:channel.id},data:{appUrl:null,tokenFingerprint:'fixture-key-fingerprint',ownerId:'user:owner',enabled:true,leaseToken:'test-lease',leaseUntil:new Date(Date.now()+3600000)}});channelRuntime.clearWebsiteRuntimeCache();});
 afterEach(()=>vi.unstubAllGlobals());afterAll(async()=>{await db?.close();await socket?.stop();await pg?.close();});
 
+describe('chat trading agent setup',()=>{
+  async function withAgent(symbols:string[],work:(agent:any)=>Promise<void>){
+    const previous=await db.tradingWorkspace.findUnique({where:{userId}});
+    const agent=await db.agent.create({data:{creatorId:userId,name:'Repairable private agent',description:'Disposable configuration for setup recovery tests.',category:'Monitoring',market:'crypto',tags:['Solana'],versions:{create:{number:1,config:{...defaultConfig,symbols},priceCents:100,setupInstructions:'Fixture setup only'}}},include:{versions:true}});
+    try{await work(agent);}finally{
+      await db.solanaPermissionChallenge.deleteMany({where:{userId}});await db.solanaTradePermission.deleteMany({where:{userId}});
+      await db.tradingWorkspace.update({where:{userId},data:{activeInstanceId:previous.activeInstanceId}});
+      const versions=await db.agentVersion.findMany({where:{agentId:agent.id}});
+      await db.instance.deleteMany({where:{userId,versionId:{in:versions.map((v:any)=>v.id)}}});
+      await db.agentVersion.deleteMany({where:{agentId:agent.id}});await db.agent.delete({where:{id:agent.id}});
+    }
+  }
+  it('reports private agent choices and separates an unselected agent from an already verified wallet and paired chat',async()=>{
+    await withAgent([SOL],async agent=>{
+      await db.tradingWorkspace.update({where:{userId},data:{activeInstanceId:null}});
+      const snapshot=(await client.get('/api/solana/chat-trading')).body;
+      expect(snapshot.paired).toBe(true);expect(snapshot.agentSetup.selectedVersionId).toBeNull();expect(snapshot.availableMints).toEqual([]);
+      expect(snapshot.agentSetup.agents.find((a:any)=>a.id===agent.versions[0].id).mints).toEqual([]);
+      expect((await other.get('/api/solana/chat-trading')).body.agentSetup.agents).toEqual([]);
+      expect((await db.solanaWallet.findUnique({where:{userId}})).address).toBe(ownerAddress);
+    });
+  });
+  it('saves a new token version and selects it atomically without replacing WhatsApp, the owner, or the original version',async()=>{
+    await withAgent([SOL],async agent=>{
+      await db.tradingWorkspace.update({where:{userId},data:{activeInstanceId:null}});
+      const before=await db.personalAgentChannel.findUnique({where:{userId}}),p=provider();
+      const saved=await post('/agent',{versionId:agent.versions[0].id,mints:[MINT]});expect(saved.status,JSON.stringify(saved.body)).toBe(200);
+      expect(saved.body.versionId).not.toBe(agent.versions[0].id);
+      expect((await db.agentVersion.findUnique({where:{id:agent.versions[0].id}})).config.symbols).toEqual([SOL]);
+      expect((await db.agentVersion.findUnique({where:{id:saved.body.versionId}})).number).toBe(2);
+      const snapshot=(await client.get('/api/solana/chat-trading')).body;
+      expect(snapshot.agentSetup.selectedVersionId).toBe(saved.body.versionId);expect(snapshot.availableMints).toEqual([MINT]);expect(snapshot.paired).toBe(true);expect(snapshot.permission).toBeNull();
+      const after=await db.personalAgentChannel.findUnique({where:{userId}});expect(after.id).toBe(before.id);expect(after.tokenFingerprint).toBe(before.tokenFingerprint);expect(after.ownerId).toBe(before.ownerId);
+      expect((await db.solanaWallet.findUnique({where:{userId}})).address).toBe(ownerAddress);expect(p.mock).not.toHaveBeenCalled();
+    });
+  });
+  it('rejects unsigned sessions, foreign agents, SOL-only lists, duplicated mints and legacy configurations',async()=>{
+    await withAgent([SOL],async agent=>{
+      const input={versionId:agent.versions[0].id,mints:[MINT]};
+      expect((await request(app).post('/api/solana/chat-trading/agent').set(headers).send(input)).status).toBe(401);
+      expect((await other.post('/api/solana/chat-trading/agent').set(headers).send(input)).status).toBe(404);
+      for(const mints of [[SOL],[],[MINT,MINT],['BTC/USD']])expect((await post('/agent',{...input,mints})).status).toBe(400);
+      await db.agentVersion.update({where:{id:agent.versions[0].id},data:{config:{...defaultConfig,symbols:['BTC/USD']}}});
+      expect((await post('/agent',input)).status).toBe(409);
+      expect(await db.agentVersion.count({where:{agentId:agent.id}})).toBe(1);
+    });
+  });
+  it('revokes existing trading access when changing the selected agent and does not authorize the replacement',async()=>{
+    await withAgent([SOL],async agent=>{
+      await grant();expect((await client.get('/api/solana/chat-trading')).body.permission.active).toBe(true);
+      expect((await post('/agent',{versionId:agent.versions[0].id,mints:[OTHER]})).status).toBe(200);
+      const snapshot=(await client.get('/api/solana/chat-trading')).body;
+      expect(snapshot.permission.active).toBe(false);expect(snapshot.permission.revokedAt).not.toBeNull();expect(snapshot.availableMints).toEqual([OTHER]);
+    });
+  });
+  it('reuses an unchanged selected version without duplicates or revoking an unchanged permission',async()=>{
+    await withAgent([MINT],async agent=>{
+      const input={versionId:agent.versions[0].id,mints:[MINT]};expect((await post('/agent',input)).body.versionId).toBe(input.versionId);
+      await grant();expect((await post('/agent',input)).status).toBe(200);
+      expect(await db.agentVersion.count({where:{agentId:agent.id}})).toBe(1);expect((await client.get('/api/solana/chat-trading')).body.permission.active).toBe(true);
+    });
+  });
+});
+
 describe('owner-wallet SOL funding preparation',()=>{
   it('requires an authenticated account and a dedicated wallet and rejects recipient overrides',async()=>{
     expect((await request(app).post('/api/solana/chat-trading/funding/prepare').set(headers).send({amount:'0.1'})).status).toBe(401);
