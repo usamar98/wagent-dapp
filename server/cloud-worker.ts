@@ -21,7 +21,7 @@ export async function runCloudWorkerCycle() {
   const claimed = await locked(async tx => {
     const previous = leaseValue((await tx.setting.findUnique({ where: { key: leaseKey } }))?.value);
     if ((previous.until || 0) > Date.now()) return false;
-    const value = JSON.stringify({ token: id, until: Date.now() + leaseMilliseconds, startedAt });
+    const value = JSON.stringify({ ...previous, token: id, until: Date.now() + leaseMilliseconds, startedAt });
     await tx.setting.upsert({ where: { key: leaseKey }, create: { key: leaseKey, value }, update: { value } });
     return true;
   });

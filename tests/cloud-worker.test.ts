@@ -92,4 +92,12 @@ describe('scheduled production WhatsApp worker', () => {
     await db.setting.create({ data: { key: 'cloudWorkerLease', value: 'null' } });
     expect(await cycle()).toEqual({ ok: true, busy: false });
   });
+  it('preserves the previous completion while the next cycle is running', async () => {
+    await cycle(); const previous = JSON.parse((await db.setting.findUniqueOrThrow({ where: { key: 'cloudWorkerLease' } })).value);
+    work.chats.mockImplementationOnce(async () => {
+      const current = JSON.parse((await db.setting.findUniqueOrThrow({ where: { key: 'cloudWorkerLease' } })).value);
+      expect(current.completedAt).toBe(previous.completedAt); expect(current.ok).toBe(true); expect(current.until).toBeGreaterThan(Date.now());
+    });
+    await cycle(); expect(work.chats).toHaveBeenCalledTimes(2);
+  });
 });

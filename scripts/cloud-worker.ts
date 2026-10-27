@@ -3,6 +3,7 @@ import { db, transaction } from '../server/db.js';
 import { cloudWorkerToken } from '../shared/cloud-worker-auth.js';
 
 const name = 'wagent-whatsapp-worker';
+const retentionName = 'wagent-whatsapp-worker-history-retention';
 const secretName = 'wagent_cloud_worker_token';
 const args = process.argv.slice(2);
 if (args.length !== 1 || !['--enable', '--disable', '--status'].includes(args[0])) throw new Error('Use --enable, --disable, or --status. Load the intended production env file first.');
@@ -26,18 +27,23 @@ try {
       // The cron definition contains a Vault lookup, never the credential itself.
       const command = `SELECT net.http_post(url := '${endpoint.replaceAll("'", "''")}', headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = '${secretName}')), body := '{}'::jsonb, timeout_milliseconds := 290000);`;
       const [job] = await tx.sql<{ id: number }>`SELECT cron.schedule(${name}, '10 seconds', ${command}) AS id`;
-      await tx.sql`UPDATE cron.job SET active = true WHERE jobid = ${job.id}`;
+      await tx.sql`SELECT cron.alter_job(job_id := ${job.id}::bigint, active := true)`;
+      // Only expire this worker's technical scheduler logs, never app trade history.
+      const cleanup = `DELETE FROM cron.job_run_details WHERE jobid IN (SELECT jobid FROM cron.job WHERE jobname IN ('${name}', '${retentionName}')) AND end_time < now() - interval '7 days'`;
+      const [retention] = await tx.sql<{ id: number }>`SELECT cron.schedule(${retentionName}, '17 3 * * *', ${cleanup}) AS id`;
+      await tx.sql`SELECT cron.alter_job(job_id := ${retention.id}::bigint, active := true)`;
     });
     console.log('Cloud worker enabled: Supabase wakes the production Vercel worker every 10 seconds. Credential stored in Vault; no secret printed.');
   } else if (mode === '--disable') {
-    await db.sql`UPDATE cron.job SET active = false WHERE jobname = ${name}`;
+    const jobs = await db.sql<{ jobid: number }>`SELECT jobid FROM cron.job WHERE jobname = ${name}`;
+    for (const job of jobs) await db.sql`SELECT cron.alter_job(job_id := ${job.jobid}::bigint, active := false)`;
     console.log('Cloud schedule disabled. Already-running work may finish; trading permissions were not changed.');
   }
-  const jobs = await db.sql`SELECT jobname, schedule, active FROM cron.job WHERE jobname = ${name}`;
+  const jobs = await db.sql`SELECT jobname, schedule, active FROM cron.job WHERE jobname IN (${name}, ${retentionName}) ORDER BY jobname`;
   const [state] = await db.sql`SELECT value FROM "Setting" WHERE key = 'cloudWorkerLease'`;
   const [heartbeat] = await db.sql`SELECT value FROM "Setting" WHERE key = 'cloudWorkerHeartbeat'`;
   const lease = state ? JSON.parse(state.value as string) : {};
-  console.log(JSON.stringify({ jobs, heartbeatAgeSeconds: heartbeat ? Math.round((Date.now() - Number(heartbeat.value)) / 1000) : null, lastCompletedAt: lease.completedAt ? new Date(lease.completedAt).toISOString() : null, lastCycleOk: lease.ok ?? null }));
+  console.log(JSON.stringify({ jobs, heartbeatAgeSeconds: heartbeat ? Math.max(0, Math.round((Date.now() - Number(heartbeat.value)) / 1000)) : null, lastCompletedAt: lease.completedAt ? new Date(lease.completedAt).toISOString() : null, lastCycleOk: lease.ok ?? null }));
 } catch (error) {
   console.error('Cloud worker configuration failed:', error instanceof Error ? error.message.replace(/postgres(?:ql)?:\/\/\S+/g, '[database URL]') : 'Unknown failure');
   process.exitCode = 1;

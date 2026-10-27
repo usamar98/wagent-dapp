@@ -13,7 +13,7 @@ Supabase Cron calls the production Vercel endpoint `/api/internal/worker` every 
    node --env-file=.env.production.local --import tsx scripts/cloud-worker.ts --status
    ```
 
-The enable command first makes an authenticated, read-only readiness check. It derives a one-purpose scheduler token from the existing server key, stores only that token in Supabase Vault, and creates or updates the single named job `wagent-whatsapp-worker`. The cron definition reads Vault at runtime and contains no credential. No secret is printed, included in a URL, or sent to a browser. Re-run enable after changing the production origin or server key. Preserve the original encryption key unless following a planned credential migration.
+The enable command first makes an authenticated, read-only readiness check. It derives a one-purpose scheduler token from the existing server key, stores only that token in Supabase Vault, and creates or updates the named job `wagent-whatsapp-worker`. A daily maintenance job expires only these two jobs' scheduler logs after seven days; application trade history is retained. Activation/deactivation uses `cron.alter_job`, rather than writing the protected job table. The cron definition reads Vault at runtime and contains no credential. No secret is printed, included in a URL, or sent to a browser. Re-run enable after changing the production origin or server key. Preserve the original encryption key unless following a planned credential migration.
 
 ## Runtime and trade safety
 
@@ -31,7 +31,7 @@ Disable future scheduled requests (already-running work may finish):
 node --env-file=.env.production.local --import tsx scripts/cloud-worker.ts --disable
 ```
 
-This does not revoke signed trading permissions. Use the app's revoke or emergency stop controls to prevent future trades. Stop the old local polling worker after verifying cloud activity, to make cloud operation independently observable.
+This does not revoke signed trading permissions. Use the app's revoke or emergency stop controls to prevent future trades. The daily scheduler-log retention job stays enabled when polling is paused. Stop the old local polling worker after verifying cloud activity, to make cloud operation independently observable.
 
 At a 10-second interval there are approximately 259,200 scheduled HTTP invocations per 30 days, plus the database checks and actual provider work. These consume existing Vercel/Supabase quotas and may incur usage charges under the account's plan. No plan upgrade or additional paid subscription is configured by this change. A paused database, disabled job, provider outage, or exhausted hosting quota can interrupt processing; this is not an uptime SLA.
 
