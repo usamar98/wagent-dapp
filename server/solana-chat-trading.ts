@@ -5,7 +5,7 @@ import { db, transaction, lockUser, type Tx } from './db.js';
 import { AppError, check, decrypt, verifyHmac } from './security.js';
 import { env } from './env.js';
 import { SOL_MINT, addressSchema, atomicAmount, humanAmount, tokenMetadata, jupiterOrder, jupiterExecute, signatureStatus, finalizedBlockHeight, fetchJson, rpc } from './solana-providers.js';
-import { chatTradingEnabled, validateTradePermission, dailyTradingUsage, unresolvedChatTrades } from './solana-permissions.js';
+import { chatTradingEnabled, validateTradePermission, dailyTradingUsage, unresolvedChatTrades, permissionAllowsMint } from './solana-permissions.js';
 import { validateChatTransaction } from './chat-transaction-policy.js';
 import { signTradingTransaction } from './trading-wallet-keys.js';
 import { channelWebsiteRuntime, websiteOrigin } from './website-runtime.js';
@@ -34,7 +34,7 @@ export async function queueChatTrade(tx:Tx,userId:string,text:string,externalId:
   const permission=await tx.solanaTradePermission.findFirst({where:{userId,revokedAt:null,expiresAt:{gt:new Date()}}});
   if(!permission)return null;
   const swap=parseChatSwap(text);check(swap,400,'Use an exact buy or sell command.');
-  const current=await validateTradePermission(tx,userId,permission.id,executionOrigin);check(permission.allowedMints.includes(swap.mint),403,'This token is outside your signed permission. Add its mint to the agent and sign updated limits on the website.');
+  const current=await validateTradePermission(tx,userId,permission.id,executionOrigin);check(permissionAllowsMint(permission,swap.mint),403,'This token is outside your signed permission. Choose Any Solana token and sign updated limits on the website, or add this mint to your approved agent tokens.');
   await noPendingChatTrade(tx,userId);
   if(swap.side==='BUY')check(BigInt(atomicAmount(swap.amount,9))+BigInt(permission.maxFeeLamports)<=BigInt(permission.perTradeLamports),409,'This buy plus the reserved fee exceeds your per-trade budget.');
   check(current.channel.id===context.id&&current.channel.ownerId===context.ownerId,403,'The approved chat owner changed.');
@@ -74,7 +74,7 @@ async function executeQueuedTrade(commandId:string,context:ChannelContext){
   try{
     check(chatTradingEnabled(),503,'Chat trading is disabled or the website needs Jupiter setup.');
     const {permission,wallet}=await transaction(async tx=>{await lockUser(tx,trade.userId);await activeChannel(tx,command,context);await noPendingChatTrade(tx,trade.userId,trade.id);return validateTradePermission(tx,trade.userId,trade.permissionId);});
-    check(permission.allowedMints.includes(trade.mint),403,'Token is outside your approved mint list.');
+    check(permissionAllowsMint(permission,trade.mint),403,'Token is outside your approved token access.');
     const info=await tokenMetadata(trade.mint),inputMint=trade.side==='BUY'?SOL_MINT:trade.mint,outputMint=trade.side==='BUY'?trade.mint:SOL_MINT;
     const rawAmount=atomicAmount(trade.amount,trade.side==='BUY'?9:info.decimals);
     const order=await jupiterOrder(inputMint,outputMint,rawAmount,wallet!.address,permission.slippageBps,true);
@@ -85,7 +85,7 @@ async function executeQueuedTrade(commandId:string,context:ChannelContext){
     await validateChatTransaction(order,wallet!.address,BigInt(permission.maxFeeLamports),permission.slippageBps);
     const signed=await transaction(async tx=>{
       await lockUser(tx,trade.userId);await activeChannel(tx,command,context);await noPendingChatTrade(tx,trade.userId,trade.id);
-      const fresh=await validateTradePermission(tx,trade.userId,trade.permissionId);check(fresh.permission.allowedMints.includes(trade.mint),403,'Mint permission was removed.');
+      const fresh=await validateTradePermission(tx,trade.userId,trade.permissionId);check(permissionAllowsMint(fresh.permission,trade.mint),403,'Token permission was removed.');
       check((await tx.solanaChatTrade.findUniqueOrThrow({where:{id:trade.id}})).status==='PREPARING',409,'Trade was cancelled during preparation.');
       check(budget<=BigInt(fresh.permission.perTradeLamports)&&await dailyTradingUsage(tx,trade.userId)+budget<=BigInt(fresh.permission.dailyLamports),409,'Your daily or per-trade budget would be exceeded.');
       check(expiresAt>Date.now()+3000,409,'Quote expired during validation. Send a fresh command.');

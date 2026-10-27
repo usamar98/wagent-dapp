@@ -20,5 +20,7 @@ No subscription upsells, invented verified returns, casino styling, or ambiguous
 ## Design Principles
 Lead with agent creation and WhatsApp pairing. Keep network, mint identity, liquidity, data age, and capability states explicit. Never label token profiles as every launch or pool age as mint age. Never imply that a listing is a safety endorsement. Keep completed setup separate from future execution. Preserve ownership isolation, credential encryption, activity history, and emergency stop. No fabricated prices, balances, user counts, returns, or AI capabilities.
 
+WhatsApp trading offers explicit owner-signed token access: any supported Solana token, or selected saved mints. One any-token approval allows later exact-mint commands until expiry or revocation, within unchanged budget and transaction protections. Existing grants stay restricted until the owner signs broader access. Saving individual mints is optional for any-token setup. No approval signs or funds a trade on its own.
+
 ## Accessibility & Inclusion
 Keyboard navigation, semantic controls, visible focus, readable contrast, reduced-motion support, responsive mobile workflows.

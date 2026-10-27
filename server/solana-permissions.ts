@@ -11,11 +11,20 @@ import { verifySolanaSignature } from './solana-swaps.js';
 import { createTradingKey } from './trading-wallet-keys.js';
 import type { ModelRows } from './database/schema.js';
 import { websiteOrigin } from './website-runtime.js';
+import { anySolanaTokenLabel, permissionTokenScopes } from '../shared/permission-scope.js';
 
 export type TradePermission = ModelRows['SolanaTradePermission'];
 export const chatTradingEnabled = () => !env.demo && providerStatus().swapsEnabled && process.env.SOLANA_CHAT_TRADING_ENABLED !== 'false';
 export const unresolvedChatTrades = ['PREPARING','PREPARED','EXECUTING','UNKNOWN'];
 export function consentWebsite(message:string,origin:string){return message.includes(`\nWebsite: ${websiteOrigin(origin)}\n`);}
+type TokenPermission = Pick<TradePermission,'tokenScope'|'allowedMints'|'consentMessage'>;
+export function validTokenScopeConsent(permission:TokenPermission){
+  if(!Array.isArray(permission.allowedMints)||!permission.allowedMints.every(m=>typeof m==='string'))return false;
+  if(permission.tokenScope==='ANY_SOLANA')return permission.allowedMints.length===0&&permission.consentMessage.includes(`\nToken scope: ${anySolanaTokenLabel}\nAllowed mints: ${anySolanaTokenLabel}\n`);
+  return permission.tokenScope==='AGENT_MINTS'&&permission.allowedMints.length>0&&permission.allowedMints.length<=10&&new Set(permission.allowedMints).size===permission.allowedMints.length&&permission.consentMessage.includes(`\nAllowed mints: ${permission.allowedMints.join(', ')}\n`);
+}
+export function permissionAllowsMint(permission:TokenPermission,mint:string){return validTokenScopeConsent(permission)&&(permission.tokenScope==='ANY_SOLANA'||permission.allowedMints.includes(mint));}
+function permissionMatchesAgent(permission:TokenPermission,mints:string[]){return validTokenScopeConsent(permission)&&(permission.tokenScope==='ANY_SOLANA'||permission.allowedMints.every(m=>mints.includes(m)));}
 async function channelOrigin(tx:Tx,channel:{appUrl:string|null}){return websiteOrigin(channel.appUrl||(await tx.setting.findUnique({where:{key:'wagent:production-origin'}}))?.value||env.appUrl);}
 async function permissionWebsite(tx:Tx,channel:{appUrl:string|null}){const origin=await channelOrigin(tx,channel);check(origin===websiteOrigin(env.appUrl),409,`Manage this connection's trading permission at ${origin}/chat-trading.`);return origin;}
 export async function revokeTrading(tx: Tx, userId: string, reason: string) {
@@ -52,7 +61,7 @@ export async function validateTradePermission(tx: Tx, userId: string, permission
   check(consentWebsite(permission.consentMessage,executionOrigin)&&await channelOrigin(tx,context.channel)===websiteOrigin(executionOrigin),409,'This trading permission belongs to a different website. Sign a new permission on the connected website.');
   check(context.wallet && permission.tradingAddress === context.wallet.address && permission.ownerAddress === context.owner.address, 409, 'Trading wallet ownership changed.');
   check(permission.channelId === context.channel.id && permission.channelFingerprint === context.channel.tokenFingerprint && permission.channelOwnerId === context.channel.ownerId && context.channel.createdAt <= permission.createdAt, 409, 'The approved WhatsApp connection changed. Authorize it again.');
-  check(permission.instanceId === context.instance.id && permission.allowedMints.every(m => context.mints.includes(m)), 409, 'The approved agent changed. Authorize it again.');
+  check(permission.instanceId === context.instance.id && permissionMatchesAgent(permission,context.mints), 409, 'The approved agent or token access changed. Review and sign a new permission.');
   return { ...context, wallet: context.wallet, permission };
 }
 export async function dailyTradingUsage(tx: Tx, userId: string, excludeId = '') {
@@ -61,9 +70,9 @@ export async function dailyTradingUsage(tx: Tx, userId: string, excludeId = '') 
   return BigInt(rows[0].amount);
 }
 const permissionInput = z.object({
-  allowedMints: z.array(addressSchema).min(1).max(10), perTradeSol: z.string().max(20), dailySol: z.string().max(20), maxFeeSol: z.string().max(20),
+  tokenScope: z.enum(permissionTokenScopes).default('AGENT_MINTS'), allowedMints: z.array(addressSchema).max(10), perTradeSol: z.string().max(20), dailySol: z.string().max(20), maxFeeSol: z.string().max(20),
   slippageBps: z.number().int().min(1).max(200), durationHours: z.number().int().min(1).max(168), consent: z.literal(true),
-}).strict();
+}).strict().superRefine((input,ctx)=>{if(input.tokenScope==='ANY_SOLANA'?input.allowedMints.length!==0:input.allowedMints.length===0)ctx.addIssue({code:'custom',path:['allowedMints'],message:input.tokenScope==='ANY_SOLANA'?'Any-token permission uses no saved mint list.':'Select at least one token from your agent.'});});
 export const permissionProofInput = z.object({ id: z.uuid(), signature: z.string().regex(/^[A-Za-z0-9+/]{86}==$/) }).strict();
 export const solanaPermissionsRouter = Router();
 solanaPermissionsRouter.use((req,res,next) => req.path === '/chat-trading' || req.path.startsWith('/chat-trading/') ? auth(req,res,next) : next('router'));
@@ -86,12 +95,12 @@ solanaPermissionsRouter.get('/chat-trading', async (req,res) => {
   const agents = versions.flatMap(version => { const parsed = configSchema.safeParse(version.config); return parsed.success ? [{ id: version.id, name: version.agent.name, number: version.number, mints: parsed.data.symbols.filter(m => addressSchema.safeParse(m).success && m !== SOL_MINT) }] : []; });
   const agentSetup = { selectedVersionId: config?.success ? instance!.versionId : null, agents };
   const sameWebsite=channel?await channelOrigin(db,channel)===websiteOrigin(env.appUrl):false;
-  const active = !!permission && sameWebsite && consentWebsite(permission.consentMessage,env.appUrl) && !permission.revokedAt && permission.expiresAt > new Date() && !req.user!.emergencyStop && linked?.address === wallet?.ownerAddress && !!channel?.enabled && permission.channelId === channel.id && permission.channelFingerprint === channel.tokenFingerprint && permission.channelOwnerId === channel.ownerId && channel.createdAt <= permission.createdAt && permission.instanceId === instance?.id && permission.allowedMints.every(m => availableMints.includes(m));
+  const active = !!permission && sameWebsite && consentWebsite(permission.consentMessage,env.appUrl) && !permission.revokedAt && permission.expiresAt > new Date() && !req.user!.emergencyStop && linked?.address === wallet?.ownerAddress && !!channel?.enabled && permission.channelId === channel.id && permission.channelFingerprint === channel.tokenFingerprint && permission.channelOwnerId === channel.ownerId && channel.createdAt <= permission.createdAt && permission.instanceId === instance?.id && permissionMatchesAgent(permission,availableMints);
   const used = await dailyTradingUsage(db,userId);
-  res.json({ wallet, permission: permission ? { id: permission.id, active, allowedMints: permission.allowedMints, perTradeSol: humanAmount(permission.perTradeLamports,9), dailySol: humanAmount(permission.dailyLamports,9), maxFeeSol: humanAmount(permission.maxFeeLamports,9), slippageBps: permission.slippageBps, expiresAt: permission.expiresAt, revokedAt: permission.revokedAt, revokeReason: permission.revokeReason } : null, availableMints, agentSetup, paired: !!channel?.ownerId && channel.enabled, usedTodaySol: humanAmount(used.toString(),9), trades, withdrawals, workerOnline: !!worker && Date.now() - Number(worker.value) < 30000, enabled: chatTradingEnabled() });
+  res.json({ wallet, permission: permission ? { id: permission.id, active, tokenScope: permission.tokenScope, allowedMints: permission.allowedMints, perTradeSol: humanAmount(permission.perTradeLamports,9), dailySol: humanAmount(permission.dailyLamports,9), maxFeeSol: humanAmount(permission.maxFeeLamports,9), slippageBps: permission.slippageBps, expiresAt: permission.expiresAt, revokedAt: permission.revokedAt, revokeReason: permission.revokeReason } : null, availableMints, agentSetup, paired: !!channel?.ownerId && channel.enabled, usedTodaySol: humanAmount(used.toString(),9), trades, withdrawals, workerOnline: !!worker && Date.now() - Number(worker.value) < 30000, enabled: chatTradingEnabled() });
 });
 solanaPermissionsRouter.post('/chat-trading/agent', async (req,res) => {
-  const input = z.object({ versionId: z.uuid(), mints: z.array(addressSchema.refine(m => m !== SOL_MINT, 'SOL funds the wallet. Choose a token mint to trade.')).min(1).max(10).refine(m => new Set(m).size === m.length, 'Token mints must be unique.') }).strict().parse(req.body);
+  const input = z.object({ versionId: z.uuid(), mints: z.array(addressSchema.refine(m => m !== SOL_MINT, 'SOL funds the wallet. Choose a token mint to trade.')).min(1).max(10).refine(m => new Set(m).size === m.length, 'Token mints must be unique.').optional() }).strict().parse(req.body);
   const result = await transaction(async tx => {
     const userId = await permissionSession(tx,req,true);
     const version = await tx.agentVersion.findFirst({ where: { id: input.versionId, agent: { creatorId: userId } } });
@@ -99,7 +108,7 @@ solanaPermissionsRouter.post('/chat-trading/agent', async (req,res) => {
     const parsed = configSchema.safeParse(version.config);
     check(parsed.success,409,'This older configuration needs a new Solana agent.');
     let versionId = version.id;
-    if (JSON.stringify(parsed.data.symbols) !== JSON.stringify(input.mints)) {
+    if (input.mints && JSON.stringify(parsed.data.symbols) !== JSON.stringify(input.mints)) {
       const latest = await tx.agentVersion.findFirst({ where: { agentId: version.agentId }, orderBy: { number: 'desc' } });
       const next = await tx.agentVersion.create({ data: { agentId: version.agentId, number: (latest?.number || 0) + 1, config: { ...parsed.data, symbols: input.mints }, priceCents: version.priceCents, setupInstructions: version.setupInstructions } });
       versionId = next.id;
@@ -132,11 +141,11 @@ solanaPermissionsRouter.post('/chat-trading/challenge', async (req,res) => {
     const userId = await permissionSession(tx,req), context = await tradingContext(tx,userId);
     const origin=await permissionWebsite(tx,context.channel);
     check(context.wallet,409,'Create your dedicated trading wallet first.');
-    const allowedMints = [...new Set(input.allowedMints)].sort();
-    check(allowedMints.length === input.allowedMints.length && allowedMints.every(m => context.mints.includes(m)),400,'Choose unique exact mints from your selected agent.');
+    const tokenScope=input.tokenScope,allowedMints = [...new Set(input.allowedMints)].sort();
+    check(allowedMints.length === input.allowedMints.length && (tokenScope==='ANY_SOLANA'||allowedMints.every(m => context.mints.includes(m))),400,'Choose unique exact mints from your selected agent.');
     const expiresAt = new Date(Date.now()+input.durationHours*3600000);
-    const payload = { userId, channelId: context.channel.id, channelFingerprint: context.channel.tokenFingerprint, channelOwnerId: context.channel.ownerId, instanceId: context.instance.id, ownerAddress: context.owner.address, tradingAddress: context.wallet.address, allowedMints, perTradeLamports, dailyLamports, maxFeeLamports, slippageBps: input.slippageBps, expiresAt: expiresAt.toISOString() };
-    const message = `${new URL(origin).host} · Wagent Ai WhatsApp trading permission\nWebsite: ${origin}\nAccount: ${userId}\nOwner wallet: ${context.owner.address}\nDedicated trading wallet: ${context.wallet.address}\nNetwork: solana:mainnet\nWhatsApp connection: ${context.channel.id}\nPaired owner: ${context.channel.ownerId}\nAgent instance: ${context.instance.id}\nAllowed mints: ${allowedMints.join(', ')}\nPer-trade total budget: ${humanAmount(perTradeLamports,9)} SOL\nDaily total budget (UTC): ${humanAmount(dailyLamports,9)} SOL\nFee/rent cap per trade: ${humanAmount(maxFeeLamports,9)} SOL\nSlippage cap: ${input.slippageBps/100}%\nProvider fee cap: 1%\nPermission expires: ${expiresAt.toISOString()}\n\nI authorize Wagent Ai to hold the encrypted signing key for this dedicated wallet and execute my explicit WhatsApp buy/sell commands without another wallet prompt. Limits are enforced by Wagent Ai software, not an on-chain spending contract. Buy SOL input or sell quoted SOL output plus the full reserved fee/rent cap counts toward both budgets. Failed and uncertain submissions retain their reservation. Updating permission does not reset daily usage. Only funds I deposit in the dedicated wallet are available. My main wallet is not authorized for spending. Revoke trading or Stop all blocks new submissions; transactions already submitted cannot be recalled.\nNonce: ${token()}`;
+    const payload = { userId, channelId: context.channel.id, channelFingerprint: context.channel.tokenFingerprint, channelOwnerId: context.channel.ownerId, instanceId: context.instance.id, ownerAddress: context.owner.address, tradingAddress: context.wallet.address, tokenScope, allowedMints, perTradeLamports, dailyLamports, maxFeeLamports, slippageBps: input.slippageBps, expiresAt: expiresAt.toISOString() };
+    const message = `${new URL(origin).host} · Wagent Ai WhatsApp trading permission\nWebsite: ${origin}\nAccount: ${userId}\nOwner wallet: ${context.owner.address}\nDedicated trading wallet: ${context.wallet.address}\nNetwork: solana:mainnet\nWhatsApp connection: ${context.channel.id}\nPaired owner: ${context.channel.ownerId}\nAgent instance: ${context.instance.id}\nToken scope: ${tokenScope==='ANY_SOLANA'?anySolanaTokenLabel:'Only the listed agent tokens'}\nAllowed mints: ${tokenScope==='ANY_SOLANA'?anySolanaTokenLabel:allowedMints.join(', ')}\nPer-trade total budget: ${humanAmount(perTradeLamports,9)} SOL\nDaily total budget (UTC): ${humanAmount(dailyLamports,9)} SOL\nFee/rent cap per trade: ${humanAmount(maxFeeLamports,9)} SOL\nSlippage cap: ${input.slippageBps/100}%\nProvider fee cap: 1%\nPermission expires: ${expiresAt.toISOString()}\n\nI authorize Wagent Ai to hold the encrypted signing key for this dedicated wallet and execute my explicit WhatsApp buy/sell commands without another wallet prompt. ${tokenScope==='ANY_SOLANA'?'This includes Solana tokens outside my agent’s saved mint list, without another approval for each mint. ':''}Limits are enforced by Wagent Ai software, not an on-chain spending contract. Buy SOL input or sell quoted SOL output plus the full reserved fee/rent cap counts toward both budgets. Failed and uncertain submissions retain their reservation. Updating permission does not reset daily usage. Only funds I deposit in the dedicated wallet are available. My main wallet is not authorized for spending. Revoke trading or Stop all blocks new submissions; transactions already submitted cannot be recalled.\nNonce: ${token()}`;
     return tx.solanaPermissionChallenge.upsert({ where: { userId_purpose: { userId, purpose: 'GRANT' } }, create: { userId, purpose: 'GRANT', sessionId: hash(req.cookies.ab_session), address: context.owner.address, message, payload, expiresAt: new Date(Date.now()+300000) }, update: { sessionId: hash(req.cookies.ab_session), address: context.owner.address, message, payload, expiresAt: new Date(Date.now()+300000) } });
   }); res.json({ id: proof.id, message: proof.message, address: proof.address });
 });
@@ -146,9 +155,9 @@ solanaPermissionsRouter.post('/chat-trading/authorize', async (req,res) => {
     const userId = await permissionSession(tx,req), proof = await tx.solanaPermissionChallenge.findFirst({ where: { id: input.id, userId, purpose: 'GRANT', sessionId: hash(req.cookies.ab_session) } });
     check(proof && proof.expiresAt > new Date(),400,'Permission proof expired or was already used. Review your limits again.');
     check(verifySolanaSignature(proof.address,Buffer.from(proof.message),Buffer.from(input.signature,'base64')),400,'The permission signature is invalid.');
-    const context = await tradingContext(tx,userId), p = proof.payload;
+    const context = await tradingContext(tx,userId), p = {...proof.payload,tokenScope:proof.payload.tokenScope??'AGENT_MINTS'};
     check(consentWebsite(proof.message,await permissionWebsite(tx,context.channel)),409,'This permission was reviewed on a different website. Review it again.');
-    check(context.wallet?.address === p.tradingAddress && context.owner.address === proof.address && context.channel.id === p.channelId && context.channel.tokenFingerprint === p.channelFingerprint && context.channel.ownerId === p.channelOwnerId && context.instance.id === p.instanceId && p.allowedMints.every((m:string) => context.mints.includes(m)) && new Date(p.expiresAt) > new Date(),409,'Your setup changed. Review and sign a new permission.');
+    check(context.wallet?.address === p.tradingAddress && context.owner.address === proof.address && context.channel.id === p.channelId && context.channel.tokenFingerprint === p.channelFingerprint && context.channel.ownerId === p.channelOwnerId && context.instance.id === p.instanceId && permissionMatchesAgent({...p,consentMessage:proof.message},context.mints) && new Date(p.expiresAt) > new Date(),409,'Your setup or token access changed. Review and sign a new permission.');
     await revokeTrading(tx,userId,'Replaced by a newly signed permission.');
     await tx.solanaTradePermission.create({ data: { ...p, expiresAt: new Date(p.expiresAt), consentMessage: proof.message, signature: input.signature } });
   }); res.json({ ok: true });
