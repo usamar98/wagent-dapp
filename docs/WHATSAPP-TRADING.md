@@ -4,13 +4,23 @@
 
 1. Create a private agent with exact token mint addresses and select it in Connections.
 2. Pair your own personal WhatsApp agent. Pairing alone never enables spending.
-3. Open **WhatsApp trading** and verify the original owner Solana wallet.
+3. Open **WhatsApp trading**, select Binance Wallet, Phantom, or Solflare, and verify the original owner Solana wallet. Binance is discovered through its built-in Solana Wallet Standard provider. A wallet that supports message signing can approve chat permissions even if it cannot sign manual swap transactions.
 4. Accept the custody disclosure and create a dedicated trading wallet. Wagent holds its signing key encrypted; the main wallet’s private key is never requested.
 5. Select permitted agent mints, per-trade and UTC daily SOL budgets, network-fee/rent cap, slippage, and a 1-hour to 7-day expiry. Review the complete message and sign with the original owner wallet.
 6. Fund the dedicated address with SOL from your wallet. Only deposited funds are available.
 7. In the paired chat send `Buy 0.01 SOL of <mint>` or `Sell 100 of <mint>`. These commands submit real trades immediately when permission is active. `Check trade` reads confirmation without submitting a new order. Without permission, requests return website review links.
 
 The current chat policy accepts user-paid Metis exact-input v2 routes with one dedicated-wallet signer. Unsupported routers, route layouts, authority changes, unsafe simulations, and routes without verified expiry are blocked. Use the manual Buy & sell flow for unsupported routes. Not every listed token has an executable route.
+
+## Binance Wallet
+
+Open the website in the Binance Wallet DApp browser or a desktop browser with Binance Wallet Extension installed. Choose **Continue with Binance Wallet** to sign in with its EVM account, then choose **Binance Wallet** in the Solana wallet selector in WhatsApp trading. Existing workspaces belong to their original EVM address; a different address creates a separate workspace, without copying permissions or funds. MetaMask sign-in remains available.
+
+Connect the Solana account, approve the ownership message, create the dedicated wallet, fund its displayed Solana mainnet address, and review/sign the spending permission. Binance may require confirmation in its mobile app for keyless-wallet signatures. The same original Solana account signs withdrawals. Never enter a seed phrase or private key on this website.
+
+There is no Binance Exchange API integration or API key. Binance Exchange can fund the dedicated address using a SOL withdrawal on the Solana network. Trading still uses Jupiter from the separately funded Wagent wallet. No QR pairing or remote WalletConnect session is offered; open the site in the supported wallet browser/extension. A detected wallet must support Solana mainnet and the requested account-level signing feature. Account changes invalidate open reviews, and signatures are checked against the exact message and original owner before submission; the API independently verifies every proof.
+
+Provider references: [Binance Solana Wallet Standard](https://developers.binance.com/en/docs/products/web3-connect/solana-provider), [Binance EVM provider for workspace sign-in](https://developers.binance.com/en/docs/products/web3-connect/evm-compatible-provider), [Binance Wallet setup](https://www.binance.com/en/support/faq/detail/ebfa9f504ec548968bf0c1ed591a3eaa).
 
 ## Limits and revocation
 

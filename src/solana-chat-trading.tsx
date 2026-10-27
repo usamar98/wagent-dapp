@@ -2,7 +2,9 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Check, Copy, MessageCircle, RefreshCw, ShieldCheck, Unplug, Wallet } from 'lucide-react';
 import { api, date } from './api';
-import { availableWallets, observeWallets, linkWallet, signWalletMessage, type SolanaWallet } from './solana-wallet';
+import { availableWallets, observeWallets, linkWallet, signWalletMessage, walletLabel, type SolanaWallet } from './solana-wallet';
+import { SolanaWalletPicker } from './solana-wallet-picker';
+import { walletError } from './wallet';
 import { LoadingRows, Notice, PageHeading, SolMark, useResource } from './solana-ui';
 import s from './solana.module.css';
 
@@ -16,9 +18,9 @@ export default function ChatTrading(){
   const [custody,setCustody]=useState(false),[consent,setConsent]=useState(false),[mints,setMints]=useState<string[]>([]),[perTrade,setPerTrade]=useState('0.05'),[daily,setDaily]=useState('0.2'),[fee,setFee]=useState('0.005'),[slippage,setSlippage]=useState('1'),[duration,setDuration]=useState('24');
   const [proof,setProof]=useState<Proof|null>(null),[withdrawProof,setWithdrawProof]=useState<Proof|null>(null),[withdrawMint,setWithdrawMint]=useState(SOL),[withdrawAmount,setWithdrawAmount]=useState('');
   const [balances,setBalances]=useState<{sol:string;tokens:{mint:string;amount:string}[]}|null>(null);
-  useEffect(()=>{const update=()=>setWallets(availableWallets());update();return observeWallets(update);},[]);
-  const wallet=wallets.find(w=>w.name===selected)||wallets[0],data=state.data;
-  async function act(label:string,work:()=>Promise<void>){setBusy(label);setError('');setNotice('');try{await work();}catch(e){setError((e as Error).message);}finally{setBusy('');void state.reload();void owner.reload();}}
+  useEffect(()=>observeWallets(()=>{const next=availableWallets();setWallets(next);setSelected(current=>current||next[0]?.name||'');setProof(null);setWithdrawProof(null);}),[]);
+  const wallet=wallets.find(w=>w.name===selected),data=state.data;
+  async function act(label:string,work:()=>Promise<void>){setBusy(label);setError('');setNotice('');try{await work();}catch(e){setError(walletError(e));}finally{setBusy('');void state.reload();void owner.reload();}}
   async function review(event:FormEvent){event.preventDefault();setProof(null);await act('review',async()=>setProof(await api('/solana/chat-trading/challenge',{allowedMints:mints,perTradeSol:perTrade.trim(),dailySol:daily.trim(),maxFeeSol:fee.trim(),slippageBps:Math.round(Number(slippage)*100),durationHours:Number(duration),consent})));}
   async function authorize(){if(!proof||!wallet)return;const reviewed=proof;setProof(null);await act('authorize',async()=>{const signature=await signWalletMessage(wallet,reviewed.address,reviewed.message);await api('/solana/chat-trading/authorize',{id:reviewed.id,signature});setNotice('Permission is active. Your paired WhatsApp chat can trade from the funded dedicated wallet within these limits.');});}
   async function withdraw(){if(!withdrawProof||!wallet)return;const reviewed=withdrawProof;setWithdrawProof(null);await act('withdraw',async()=>{const signature=await signWalletMessage(wallet,reviewed.address,reviewed.message);await api('/solana/chat-trading/withdrawal',{id:reviewed.id,signature});setNotice('Withdrawal request recorded. Check its confirmation below before requesting another transfer.');});}
@@ -29,7 +31,8 @@ export default function ChatTrading(){
     <div className={s.permissionLayout}><div>
       <section className={s.connectionSection}><div className={s.formTitle}><span>01</span><div><h2>Verify your owner wallet</h2><p>This Solana wallet signs the permission and receives withdrawals.</p></div></div>
       {owner.data?.wallet&&<p className={s.walletAddress}>{owner.data.wallet.address}</p>}
-      {wallet?<div className={s.actions}><label className={s.field}>Wallet app<select value={wallet.name} onChange={e=>setSelected(e.target.value)}>{wallets.map(w=><option key={w.name}>{w.name}</option>)}</select></label><button className={`${s.button} ${s.secondary}`} disabled={!!busy} onClick={()=>void act('link',async()=>{await linkWallet(wallet);setProof(null);setNotice('Solana owner wallet verified.');})}>{busy==='link'?'Check your wallet…':owner.data?.wallet?'Verify owner wallet':'Connect Solana wallet'}</button></div>:<p className={s.fine}>Open this page with a Wallet Standard compatible wallet such as Phantom or Solflare to sign permissions.</p>}
+      <SolanaWalletPicker wallets={wallets} selected={wallet} disabled={!!busy} onChange={name=>{setSelected(name);setProof(null);setWithdrawProof(null);}}/>
+      {wallet&&<button className={`${s.button} ${s.secondary}`} disabled={!!busy} onClick={()=>void act('link',async()=>{await linkWallet(wallet);setProof(null);setNotice(`${walletLabel(wallet)} Solana owner wallet verified.`);})}>{busy==='link'?'Check your wallet…':`${owner.data?.wallet?'Verify':'Connect'} ${walletLabel(wallet)}`}</button>}
       {!data.paired||!data.availableMints.length?<Notice>Select your private agent and pair WhatsApp in <Link to="/connections">Connections</Link>. The selected agent needs at least one exact token mint.</Notice>:<p className={s.serviceState}><Check size={14}/>WhatsApp paired · {data.availableMints.length} token mint{data.availableMints.length===1?'':'s'} available</p>}</section>
       <section className={s.connectionSection}><div className={s.formTitle}><span>02</span><div><h2>Your dedicated trading wallet</h2><p>Separate funds for chat orders. Your main wallet gives no ongoing spending access.</p></div></div>
       <p className={s.permissionDisclosure}>Wagent Ai holds this wallet’s encrypted signing key. Spending limits are enforced by the app, rather than an on-chain spending contract. A compromise of the service or encryption key could put deposited funds at risk.</p>

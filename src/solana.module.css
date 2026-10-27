@@ -1,4 +1,6 @@
 :global(*){box-sizing:border-box}
+.walletPicker{display:grid;gap:8px;margin:12px 0 16px;max-width:65ch}
+.accountWalletActions{display:grid;gap:10px}
 :global(:root){font-family:'Segoe UI',system-ui,sans-serif;color:oklch(93% .008 280);background:oklch(14% .01 280);font-synthesis:none;--bg:oklch(14% .01 280);--panel:oklch(17.5% .012 280);--panel2:oklch(21% .014 280);--text:oklch(93% .008 280);--muted:oklch(71% .016 280);--line:oklch(28% .013 280);--mint:oklch(84% .15 163);--violet:oklch(71% .19 300);--danger:oklch(79% .12 20);--brand:oklch(55% .25 299)}
 :global(body){margin:0;font-size:14px;line-height:1.6;min-width:320px}
 :global(button),:global(input),:global(select),:global(textarea){font:inherit}

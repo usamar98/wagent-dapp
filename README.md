@@ -4,7 +4,7 @@ A Solana-only agent workspace. Create a private token configuration, pair your p
 
 ## Available now
 
-- MetaMask message sign-in for workspace identity. This does not connect a Solana trading wallet.
+- MetaMask or Binance Wallet message sign-in for EVM workspace identity. Verify the separate Solana owner account in Binance Wallet, Phantom, Solflare, or another compatible Wallet Standard wallet for trading. No Binance API key is needed.
 - Private agent creation with 1–10 Solana token mints.
 - Agent selection, encrypted personal WhatsApp keys, one-time ownership pairing, manual sync, and background polling.
 - Real Solana token discovery and mint search from DEX Screener, refreshed every 60 seconds.
@@ -61,3 +61,5 @@ npm run build
 Tests use isolated embedded PostgreSQL fixtures, never hosted application data. npm run dev:demo starts an optional isolated demo. The browser suite in e2e/ describes the Solana discovery, account, builder, and Coming soon flows. Run browser interaction checks through the supported browser tool in agent sessions.
 
 Personal WhatsApp availability depends on the account rollout. Pairing only accepts the agent creator and never stores wallet recovery phrases. Agent chats are not end-to-end encrypted. MetaMask account/network changes end the workspace session. Account sign-in is independent of future Solana swap authorization.
+
+Binance Wallet connection and signing setup: [WhatsApp trading guide](docs/WHATSAPP-TRADING.md#binance-wallet). No Binance API key or additional environment variable is required.
