@@ -111,6 +111,11 @@ describe('Binance Solana Wallet Standard connection', () => {
     const absent = renderToStaticMarkup(createElement(SolanaWalletPicker, { wallets: [], selected: undefined, disabled: false, onChange: () => {} }));
     expect(absent).toContain('DApp browser'); expect(absent).not.toContain('<option'); expect(absent).toContain('No Binance API key');
   });
+  it('keeps Binance setup visible when MetaMask is the only detected Solana wallet',()=>{
+    const f=fixture('MetaMask');const html=renderToStaticMarkup(createElement(SolanaWalletPicker,{wallets:[f.wallet],selected:f.wallet,disabled:false,onChange:()=>{}}));
+    expect(html).toContain('Set up Binance Wallet');expect(html).toContain('appears in the wallet list when detected');expect(html).not.toContain('value="Binance');
+    expect(html).toContain('Find your Solana address');expect(html).toContain('address dropdown below your account name');
+  });
 });
 
 describe('one-time SOL deposits from a connected wallet', () => {

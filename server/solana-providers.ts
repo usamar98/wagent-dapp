@@ -38,10 +38,26 @@ export function atomicAmount(value:string,decimals:number):string {
 }
 export function humanAmount(value:string,decimals:number) {const padded=value.padStart(decimals+1,'0');return decimals?`${padded.slice(0,-decimals)}.${padded.slice(-decimals)}`.replace(/\.?0+$/,''):value;}
 export const orderSchema=z.object({requestId:z.string().min(1).max(200),transaction:z.string().min(1).max(10000),inputMint:addressSchema,outputMint:addressSchema,inAmount:z.string().regex(/^[1-9]\d{0,19}$/),outAmount:z.string().regex(/^[1-9]\d{0,19}$/),otherAmountThreshold:z.string().regex(/^[1-9]\d{0,19}$/),router:z.string().max(80),feeBps:z.number().finite().nonnegative().optional(),feeMint:z.string().optional(),priceImpact:z.number().finite().optional(),priceImpactPct:z.union([z.number(),z.string()]).optional(),slippageBps:z.number().int().min(0).max(500).optional(),expireAt:z.string().optional(),lastValidBlockHeight:z.string().optional(),signatureFeeLamports:z.number().nonnegative().optional(),prioritizationFeeLamports:z.number().nonnegative().optional(),rentFeeLamports:z.number().nonnegative().optional(),signatureFeePayer:z.string().nullable().optional(),taker:z.string().nullable().optional()});
+function orderFailure(raw:{router?:unknown;errorCode?:unknown},inputMint:string){
+  // Jupiter reuses error numbers across routers. Never interpret a number alone
+  // or display an untrusted provider errorMessage as instructions to the user.
+  if(['metis','dflow','okx'].includes(String(raw.router))){
+    if(raw.errorCode===1)return inputMint===SOL_MINT?'The Solana wallet paying for this swap does not have enough native SOL. Fund that wallet on the Solana network and leave SOL for fees.':'The Solana wallet paying for this swap does not have enough of the token you are selling. Check its token balance and keep native SOL for fees.';
+    if(raw.errorCode===2)return 'The Solana wallet paying for this swap needs native SOL for network fees. SOL or other assets on Ethereum and BNB Chain cannot pay Solana fees.';
+    if(raw.errorCode===3)return 'This swap is below Jupiter’s minimum size for gasless execution. Review the amount and available fee options.';
+  }
+  if(raw.router==='jupiterz'){
+    if(raw.errorCode===1)return 'The Solana wallet paying for this swap cannot fund it. Check its input-token balance and native SOL for fees.';
+    if(raw.errorCode===2)return 'Jupiter could not find the required token account for this wallet. Check the token mint and Solana wallet setup.';
+    if(raw.errorCode===3)return 'Jupiter could not build a transaction for this quote. Request a fresh quote or check whether the token has a supported route.';
+  }
+  return 'Jupiter cannot prepare this swap. Check token support, the paying Solana wallet’s balance, and SOL for fees. No swap was submitted.';
+}
 export async function jupiterOrder(inputMint:string,outputMint:string,amount:string,taker:string,slippageBps:number,chatOnly=false) {
   const params=new URLSearchParams({inputMint,outputMint,amount,taker,slippageBps:String(slippageBps),maxSupportedTransactionVersion:'0',excludeRouters:chatOnly?'jupiterz,dflow,okx':'jupiterz'});
   const raw=await fetchJson(`https://api.jup.ag/swap/v2/order?${params}`,{headers:jupiterHeaders()},'Jupiter');
-  check(!raw.errorCode&&raw.transaction,400,'Jupiter cannot prepare this swap. Check token support, funds, and SOL for fees.');
+  check(raw&&typeof raw==='object'&&!Array.isArray(raw),502,'Jupiter returned an unsupported order response.');
+  check(!raw.errorCode&&raw.transaction,400,orderFailure(raw,inputMint));
   const order=orderSchema.safeParse(raw);check(order.success,502,'Jupiter returned an unsupported order response.');
   check(order.data.inputMint===inputMint&&order.data.outputMint===outputMint&&order.data.inAmount===amount,502,'Jupiter returned an order that does not match the requested tokens or amount.');
   check(!order.data.taker||order.data.taker===taker,502,'Jupiter returned a different wallet.');

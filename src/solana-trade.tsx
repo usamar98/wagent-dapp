@@ -32,7 +32,7 @@ export default function SolanaTrade() {
   return <><PageHeading label="JUPITER · SOLANA MAINNET" title="Your wallet. Your next move." description="Swap SOL and Solana tokens. Review each quote and approve each transaction in your wallet."><Link className={s.textLink} to="/chat-trading">Set up WhatsApp trading <ArrowUpRight size={15}/></Link></PageHeading>
     {(error || desk.error) && <Notice error>{error || desk.error}</Notice>}{!desk.data ? <LoadingRows/> : <>
     {!desk.data.providers.swapsEnabled && <Notice>Trading setup required. The server needs a Jupiter API key and the swaps switch enabled. Your wallet remains under your control.</Notice>}
-    <div className={s.tradeLayout}><section><div className={s.connectionSection}><div className={s.formTitle}><Wallet size={20}/><div><h2>Solana trading wallet</h2><p>Separate from your EVM workspace account.</p></div></div>
+    <div className={s.tradeLayout}><section><div className={s.connectionSection}><div className={s.formTitle}><Wallet size={20}/><div><h2>Solana trading wallet</h2><p>This page spends from the linked Solana wallet, separate from your 0x workspace identity and your WhatsApp trading balance.</p></div></div>
       {address && <p className={s.walletAddress}>{address}</p>}
       <SolanaWalletPicker wallets={wallets} selected={localWallet} disabled={!!busy} onChange={name => { setSelected(name); setQuote(null); }}/>
       <div className={s.actions}>{localWallet && <button className={s.button} disabled={!!busy} onClick={() => void act('link', async () => { await linkWallet(localWallet); setQuote(null); })}>{busy === 'link' ? 'Check wallet…' : `${address ? 'Verify' : 'Connect'} ${walletLabel(localWallet)}`}</button>}

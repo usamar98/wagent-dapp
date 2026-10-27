@@ -40,6 +40,16 @@ Without advance permission, personal WhatsApp commands `Buy 0.1 SOL of <mint>` a
 
 Official references: [Jupiter Swap API](https://developers.jup.ag/docs/swap/order-and-execute), [DEX Screener API](https://docs.dexscreener.com/api/reference).
 
+## Wallet identity, funding, and quote errors
+
+The workspace sign-in address (`0x…`) and the Solana trading address are separate. Current MetaMask versions support Solana; use the address dropdown below the account name to find the Solana address, rather than adding an EVM custom network. See [MetaMask's Solana guide](https://support.metamask.io/configure/networks/navigating-solana/).
+
+Binance Wallet is detected through Solana Wallet Standard and appears in the app's Wallet app selector when available. Its setup link remains visible even when another wallet is detected. Open the site inside Binance Wallet's DApp browser or use its compatible extension. This does not connect the Binance Exchange balance or require a Binance Exchange API key. See [Binance Wallet extension setup](https://www.binance.com/en/support/faq/detail/99532b46a51b454a9fd2e061a99619bd).
+
+Manual Buy & sell spends from the linked owner Solana wallet shown on that page. WhatsApp trading spends only from the separate funded trading wallet after signed permission. A balance in one does not fund the other. Native SOL on Solana is required for the input of a buy and for applicable network fees; an EVM balance does not cover Solana fees.
+
+Jupiter can return pricing with an empty transaction when execution cannot be prepared. The app interprets both the router and error number: Metis/Dflow/OKX code 1 means insufficient input balance, code 2 means insufficient SOL for gas, and code 3 concerns a gasless minimum. JupiterZ reuses these numbers for different meanings, including a missing token account for code 2. Unknown errors remain generic and provider-supplied instructions are not displayed. These errors do not submit a swap.
+
 ## Migrating existing connections and alerts
 
 Migration `20261026151345_screener_discovery_channel_origin.sql` converts legacy new-pool rules to discovery rules and existing DEXTools thresholds to DEX Screener. Existing rules and event history remain stored. Discovery rules establish a new baseline before sending new alerts. Existing encrypted WhatsApp credentials and pairings remain valid. The first production API request registers its canonical APP_URL; legacy channels use it automatically. New connections store their website origin directly. No re-pairing is required for the environment fix.
