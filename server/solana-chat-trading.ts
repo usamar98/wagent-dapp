@@ -17,8 +17,8 @@ export function parseChatSwap(text:string){
   const match=/^(buy|sell)\s+(\d{1,12}(?:\.\d{1,18})?)\s+(SOL\s+of|of)\s+([1-9A-HJ-NP-Za-km-z]{32,44})$/i.exec(text.trim());
   if(!match)return null;
   const side=match[1].toUpperCase() as 'BUY'|'SELL';
-  check(addressSchema.safeParse(match[4]).success&&match[4]!==SOL_MINT,400,'Use an exact Solana token mint other than wrapped SOL.');
-  check(side==='BUY'?match[3].toLowerCase()==='sol of':match[3].toLowerCase()==='of',400,'Use Buy <SOL amount> SOL of <mint>, or Sell <token amount> of <mint>.');
+  check(addressSchema.safeParse(match[4]).success&&match[4]!==SOL_MINT,400,'Use an exact Solana token WGT address other than wrapped SOL.');
+  check(side==='BUY'?match[3].toLowerCase()==='sol of':match[3].toLowerCase()==='of',400,'Use Buy <SOL amount> SOL of <WGT>, or Sell <token amount> of <WGT>.');
   return {side,amount:match[2],mint:match[4]};
 }
 export async function noPendingChatTrade(tx:Tx,userId:string,excludeId=''){
@@ -34,7 +34,7 @@ export async function queueChatTrade(tx:Tx,userId:string,text:string,externalId:
   const permission=await tx.solanaTradePermission.findFirst({where:{userId,revokedAt:null,expiresAt:{gt:new Date()}}});
   if(!permission)return null;
   const swap=parseChatSwap(text);check(swap,400,'Use an exact buy or sell command.');
-  const current=await validateTradePermission(tx,userId,permission.id,executionOrigin);check(permissionAllowsMint(permission,swap.mint),403,'This token is outside your signed permission. Choose Any Solana token and sign updated limits on the website, or add this mint to your approved agent tokens.');
+  const current=await validateTradePermission(tx,userId,permission.id,executionOrigin);check(permissionAllowsMint(permission,swap.mint),403,'This token is outside your signed permission. Choose Any Solana token and sign updated limits on the website, or add this WGT to your approved agent tokens.');
   await noPendingChatTrade(tx,userId);
   if(swap.side==='BUY')check(BigInt(atomicAmount(swap.amount,9))+BigInt(permission.maxFeeLamports)<=BigInt(permission.perTradeLamports),409,'This buy plus the reserved fee exceeds your per-trade budget.');
   check(current.channel.id===context.id&&current.channel.ownerId===context.ownerId,403,'The approved chat owner changed.');
@@ -44,7 +44,7 @@ export async function queueChatTrade(tx:Tx,userId:string,text:string,externalId:
 }
 function tradeReply(trade:ChatTrade){
   const prefix=trade.status==='CONFIRMED'?'TRADE CONFIRMED':trade.status==='FAILED'?'TRADE FAILED':trade.status==='CANCELLED'||trade.status==='REJECTED'?'NOT EXECUTED':'CONFIRMATION PENDING';
-  return `${prefix} · ${trade.side==='BUY'?`Buy with ${trade.amount} SOL`:`Sell ${trade.amount} tokens`}\nMint: ${trade.mint}\nTrading wallet: ${trade.walletAddress}\n${trade.quote.minimumOutput?`Minimum receive: ${trade.quote.minimumOutput} ${trade.side==='BUY'?'tokens':'SOL'}\n`:''}${trade.error?`${trade.error}\n`:''}${trade.signature?`https://solscan.io/tx/${trade.signature}\n`:''}Reference: ${trade.id}${['PREPARED','EXECUTING','UNKNOWN'].includes(trade.status)?'\nDo not resend this order. Send Check trade to check confirmation.':''}`;
+  return `${prefix} · ${trade.side==='BUY'?`Buy with ${trade.amount} SOL`:`Sell ${trade.amount} tokens`}\nWGT: ${trade.mint}\nTrading wallet: ${trade.walletAddress}\n${trade.quote.minimumOutput?`Minimum receive: ${trade.quote.minimumOutput} ${trade.side==='BUY'?'tokens':'SOL'}\n`:''}${trade.error?`${trade.error}\n`:''}${trade.signature?`https://solscan.io/tx/${trade.signature}\n`:''}Reference: ${trade.id}${['PREPARED','EXECUTING','UNKNOWN'].includes(trade.status)?'\nDo not resend this order. Send Check trade to check confirmation.':''}`;
 }
 async function finishCommand(commandId:string,trade:ChatTrade){
   await db.agentCommand.update({where:{id:commandId},data:{status:['REJECTED','CANCELLED'].includes(trade.status)?'REJECTED':'COMPLETED',reply:tradeReply(trade)}});

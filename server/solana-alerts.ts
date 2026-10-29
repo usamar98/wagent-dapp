@@ -12,7 +12,7 @@ import type { ModelRows } from './database/schema.js';
 
 type Rule=ModelRows['SolanaAlertRule'];
 const ruleInput=z.object({name:z.string().trim().min(2).max(80),kind:z.enum(['PRICE_ABOVE','PRICE_BELOW','LIQUIDITY_BELOW','NEW_DISCOVERY']),source:z.literal('DEX_SCREENER'),mint:addressSchema.nullable(),threshold:z.number().finite().positive().max(1e15).nullable(),delivery:z.enum(['IN_APP','BOTH']),minLiquidityUsd:z.number().finite().min(0).max(1e15).default(0),maxDiscoveryAgeMinutes:z.number().int().min(1).max(1440).default(60),cooldownMinutes:z.number().int().min(5).max(10080).default(30)}).strict().superRefine((v,c)=>{
-  if(v.kind==='NEW_DISCOVERY'?(v.mint!==null||v.threshold!==null):(v.mint===null||v.threshold===null))c.addIssue({code:'custom',message:'Discovery rules do not use a mint/threshold. Price and liquidity rules need an exact mint and threshold.'});
+  if(v.kind==='NEW_DISCOVERY'?(v.mint!==null||v.threshold!==null):(v.mint===null||v.threshold===null))c.addIssue({code:'custom',message:'Discovery rules do not use a WGT/threshold. Price and liquidity rules need an exact WGT and threshold.'});
 });
 export const clearAlertProviderCache=clearDiscoveryCache;
 async function emit(tx:Tx,rule:Rule,dedupeKey:string,title:string,body:string,snapshot:unknown){
@@ -38,7 +38,7 @@ export async function checkAlert(rule:Rule){
     else{
       const feed=await discoverTokens('',[rule.mint!]);check(!feed.stale&&Date.now()-Date.parse(feed.fetchedAt)<90000,502,'Fresh DEX Screener data is unavailable. The rule was not evaluated.');
       const found=feed.tokens.find(t=>t.mint===rule.mint),value=rule.kind==='LIQUIDITY_BELOW'?found?.liquidityUsd:found?.priceUsd;
-      check(typeof value==='number'&&Number.isFinite(value),502,'This mint has no indexed price/liquidity yet. The rule was not evaluated.');observation={at:new Date(feed.fetchedAt),value,pair:found!.pairAddress};
+      check(typeof value==='number'&&Number.isFinite(value),502,'This WGT has no indexed price/liquidity yet. The rule was not evaluated.');observation={at:new Date(feed.fetchedAt),value,pair:found!.pairAddress};
     }
     await transaction(async tx=>{
       await lockUser(tx,rule.userId);
@@ -55,7 +55,7 @@ export async function checkAlert(rule:Rule){
           const seen=discovered.find(row=>row.mint===item.mint)?.firstSeenAt;
           if(!seen||reported.has(item.mint)||seen<=current.discoveryBaselineAt||seen>now||now.getTime()-seen.getTime()>current.maxDiscoveryAgeMinutes*60000||item.liquidityUsd===null||item.liquidityUsd<current.minLiquidityUsd)continue;
           const title=`Newly discovered Solana token · ${item.symbol}`;
-          const body=`${title}\n${item.name}\nMint: ${item.mint}\nPool liquidity: $${item.liquidityUsd.toLocaleString('en-US')}\nFirst observed by Wagent Ai: ${seen.toISOString()}\nSource: DEX Screener latest profiles. This is not a token launch time or a safety endorsement. Coverage is limited.\n${item.screenerUrl}`;
+          const body=`${title}\n${item.name}\nWGT: ${item.mint}\nPool liquidity: $${item.liquidityUsd.toLocaleString('en-US')}\nFirst observed by Wagent Ai: ${seen.toISOString()}\nSource: DEX Screener latest profiles. This is not a token launch time or a safety endorsement. Coverage is limited.\n${item.screenerUrl}`;
           if(await emit(tx,current,item.mint,title,body,{...item,firstSeenAt:seen}))count++;
           if(count>=5)break;
         }
@@ -65,7 +65,7 @@ export async function checkAlert(rule:Rule){
         const matches=current.kind==='PRICE_ABOVE'?observation.value>current.threshold!:observation.value<current.threshold!;
         const cooled=!current.lastTriggeredAt||now.getTime()-current.lastTriggeredAt.getTime()>=current.cooldownMinutes*60000;
         const trigger=matches&&!current.lastMatched&&cooled;
-        if(trigger){const title=`${current.name} · threshold reached`,body=`${title}\nMint: ${current.mint}\n${current.kind==='LIQUIDITY_BELOW'?'Pool liquidity':'Price'}: $${observation.value}\nThreshold: $${current.threshold}\nSource: DEX Screener\nObserved: ${observation.at.toISOString()}\nThis alert does not place a trade.`;await emit(tx,current,observation.at.toISOString(),title,body,observation);}
+        if(trigger){const title=`${current.name} · threshold reached`,body=`${title}\nWGT: ${current.mint}\n${current.kind==='LIQUIDITY_BELOW'?'Pool liquidity':'Price'}: $${observation.value}\nThreshold: $${current.threshold}\nSource: DEX Screener\nObserved: ${observation.at.toISOString()}\nThis alert does not place a trade.`;await emit(tx,current,observation.at.toISOString(),title,body,observation);}
         await tx.solanaAlertRule.update({where:{id:current.id},data:{lastCheckedAt:now,lastObservedAt:observation.at,lastMatched:matches,lastError:null,...(trigger?{lastTriggeredAt:now}:{})}});
       }
     });

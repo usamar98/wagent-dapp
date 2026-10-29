@@ -15,7 +15,7 @@ import { queueChatTrade, dispatchChatCommand } from './solana-chat-trading.js';
 import { revokeTrading, validateTradePermission } from './solana-permissions.js';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-const help = 'WAGENT AI · SOLANA · Try Status; Check trade; Revoke trading; Stop all; Buy 0.1 SOL of <mint>; Sell 100 of <mint>. With active signed permission, WhatsApp orders trade from your funded dedicated wallet within your approved limits. Otherwise buy/sell opens a website review with your Solana wallet signature. Configure permission, token alerts, and withdrawals on the website. Earlier paper balances are simulations.';
+const help = 'WAGENT AI · SOLANA · Try Status; Check trade; Revoke trading; Stop all; Buy 0.1 SOL of <WGT>; Sell 100 of <WGT>. With active signed permission, WhatsApp orders trade from your funded dedicated wallet within your approved limits. Otherwise buy/sell opens a website review with your Solana wallet signature. Configure permission, token alerts, and withdrawals on the website. Earlier paper balances are simulations.';
 
 export async function getWorkspace(userId: string) {
   return transaction(async tx => {
@@ -81,15 +81,15 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
           if(queued)return {command:queued,duplicate:false};
         }
         const side=tradeLink[1].toUpperCase(),amount=tradeLink[2],mint=tradeLink[4];
-        check(isSolanaAddress(mint)&&Number(amount)>0,400,'Use a valid mint and positive amount.');
-        check(side==='BUY'?tradeLink[3].toLowerCase()==='sol of':tradeLink[3].toLowerCase()==='of',400,'Use Buy <SOL amount> SOL of <mint>, or Sell <token amount> of <mint>.');
+        check(isSolanaAddress(mint)&&Number(amount)>0,400,'Use a valid WGT and positive amount.');
+        check(side==='BUY'?tradeLink[3].toLowerCase()==='sol of':tradeLink[3].toLowerCase()==='of',400,'Use Buy <SOL amount> SOL of <WGT>, or Sell <token amount> of <WGT>.');
         const link=new URL('/trade',website.appUrl);link.search=new URLSearchParams({side,mint,amount}).toString();
-        reply=`SOLANA SWAP REVIEW · ${side==='BUY'?`Spend ${amount} SOL`:`Sell ${amount} tokens`}\nMint: ${mint}\n${link}\nSign in, review a fresh Jupiter quote, and approve it in your linked Solana wallet. This message does not submit an order. For WhatsApp-only trading, fund and authorize a dedicated wallet on the WhatsApp trading page.${website.swapsEnabled===false?' Jupiter trading setup is still required.':website.swapsEnabled===null?' Website trading status could not be checked; open the link to verify.':''}`;
+        reply=`SOLANA SWAP REVIEW · ${side==='BUY'?`Spend ${amount} SOL`:`Sell ${amount} tokens`}\nWGT: ${mint}\n${link}\nSign in, review a fresh Jupiter quote, and approve it in your linked Solana wallet. This message does not submit an order. For WhatsApp-only trading, fund and authorize a dedicated wallet on the WhatsApp trading page.${website.swapsEnabled===false?' Jupiter trading setup is still required.':website.swapsEnabled===null?' Website trading status could not be checked; open the link to verify.':''}`;
         const saved=await tx.agentCommand.create({data:{userId,source,externalId,text,reply,status:'COMPLETED',channelId:channelContext?.id,recipientId:channelContext?.ownerId,deliveryStatus:source==='WHATSAPP'?'PENDING':'NOT_REQUIRED',createdAt:now}});return {command:saved,duplicate:false};
       }
       const command = parseCommand(text);
       if (command.kind === 'invalid') throw new AppError(400, command.reason);
-      if (!env.demo && (command.kind === 'trade' || command.kind === 'confirm' || command.kind === 'start')) throw new AppError(409, 'Use Buy <amount> SOL of <mint> or Sell <amount> of <mint> for a website review link. Each real swap needs a Solana wallet signature on the website. Configure automatic alerts in Token alerts.');
+      if (!env.demo && (command.kind === 'trade' || command.kind === 'confirm' || command.kind === 'start')) throw new AppError(409, 'Use Buy <amount> SOL of <WGT> or Sell <amount> of <WGT> for a website review link. Each real swap needs a Solana wallet signature on the website. Configure automatic alerts in Token alerts.');
       if (command.kind === 'help') reply = `${help}\nManage your alerts: ${new URL('/alerts',website.appUrl)}`;
       else if(command.kind==='revoke'){
         await revokeTrading(tx,userId,'Trading permission revoked from the paired WhatsApp chat.');

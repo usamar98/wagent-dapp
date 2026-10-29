@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowRight, ArrowUpRight, Check, Copy, ExternalLink, LockKeyhole, MessageCircle, RefreshCw, ShieldCheck, Unplug, Wallet, Workflow } from 'lucide-react';
 import { api, date } from './api';
 import { LoadingRows, Notice, PageHeading, SolMark, useResource } from './solana-ui';
 import s from './solana.module.css';
+import { WhatsAppConnectionPreview } from './whatsapp-connection-preview';
 
 type Desk = {
   workspace: { activeInstanceId: string | null };
@@ -16,6 +17,20 @@ export function ConnectionsHub({ user, refresh }: { user: { id: string; emergenc
   const { data, error, reload } = useResource<Desk>('/trading', true, 15000);
   const [key, setKey] = useState(''), [label, setLabel] = useState('My Solana agent'), [consent, setConsent] = useState(false), [pairing, setPairing] = useState(''), [busy, setBusy] = useState(false), [failure, setFailure] = useState(''), [notice, setNotice] = useState('');
   const [version, setVersion] = useState(''), [params] = useSearchParams(); const initialized = useRef(false);
+  const [connectionPreview, setConnectionPreview] = useState<{ label: string } | null>(null);
+  const previousPairing = useRef<boolean | null>(null);
+  const dismissPreview = useCallback(() => setConnectionPreview(null), []);
+  const paired = data ? !!data.channel?.paired && data.channel.enabled : null;
+  const connectionLabel = data?.channel?.label || 'Wagent Ai';
+  useEffect(() => {
+    if (paired === null) return;
+    if (paired && previousPairing.current === false) {
+      setConnectionPreview({ label: connectionLabel });
+      setPairing('');
+    }
+    if (!paired) setConnectionPreview(null);
+    previousPairing.current = paired;
+  }, [paired, connectionLabel]);
   useEffect(() => {
     if (!data || initialized.current) return;
     const supplied = params.get('version');
@@ -24,9 +39,10 @@ export function ConnectionsHub({ user, refresh }: { user: { id: string; emergenc
     setVersion(supplied && data.versions.some(version => version.id === supplied) ? supplied : validActive || data.versions[0]?.id || ''); initialized.current = true;
   }, [data, params]);
   async function perform(action: () => Promise<void>) { setBusy(true); setFailure(''); setNotice(''); try { await action(); await reload(); } catch (error) { setFailure((error as Error).message); } finally { setBusy(false); } }
-  async function connect(event: FormEvent) { event.preventDefault(); await perform(async () => { const result = await api<{ pairingCommand: string }>('/whatsapp-agent', { label, apiKey: key, consent }); setKey(''); setPairing(result.pairingCommand); setNotice('Key saved privately. Send the LINK command from your own WhatsApp agent chat.'); }); }
+  async function connect(event: FormEvent) { event.preventDefault(); await perform(async () => { const result = await api<{ pairingCommand: string }>('/whatsapp-agent', { label, apiKey: key, consent }); previousPairing.current = false; dismissPreview(); setKey(''); setPairing(result.pairingCommand); setNotice('Key saved privately. Send the LINK command from your own WhatsApp agent chat.'); }); }
   const selected = data?.instances.find(instance => instance.id === data.workspace.activeInstanceId)?.versionId;
   return <>
+    {connectionPreview && paired && <WhatsAppConnectionPreview label={connectionPreview.label} onDismiss={dismissPreview}/>}
     <PageHeading label="ONE AGENT. YOUR OWN CONVERSATION." title="Connect WhatsApp" description="Pair your personal WhatsApp agent with the Solana configuration you created."><Link className={s.textLink} to="/docs">Setup guide <ArrowUpRight size={15}/></Link></PageHeading>
     {(error || failure) && <Notice error>{error || failure} {error && <button className={s.linkButton} onClick={() => void reload()}>Retry</button>}</Notice>}{notice && <Notice>{notice}</Notice>}
     {!data ? !error && <LoadingRows/> : <div className={s.connectionLayout}><div>

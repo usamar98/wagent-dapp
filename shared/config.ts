@@ -5,7 +5,7 @@ export const configSchema = z.object({
   schemaVersion: z.literal(1).default(1),
   market: z.literal('crypto'),
   network: z.literal('solana').default('solana'),
-  symbols: z.array(z.string().refine(isSolanaAsset, 'Choose a Solana mint address or supported Solana asset.')).min(1).max(10).refine(a => new Set(a).size === a.length, 'Tokens must be unique'),
+  symbols: z.array(z.string().refine(isSolanaAsset, 'Choose a Solana WGT address or supported Solana asset.')).min(1).max(10).refine(a => new Set(a).size === a.length, 'Tokens must be unique'),
   timeframe: z.enum(['1m', '5m', '15m', '1h', '4h', '1d']),
   strategy: z.enum(['price_alert', 'rsi', 'ma_crossover', 'portfolio_monitor']),
   entry: z.number().positive().max(10000000),

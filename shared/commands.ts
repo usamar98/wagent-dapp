@@ -23,8 +23,8 @@ export function parseCommand(input: string): ParsedCommand {
     const amountCents = Math.round(Number(trade[2]) * 100);
     if (amountCents < 100 || amountCents > 100000000) return { kind: 'invalid', reason: 'Enter a USD amount between $1 and $1,000,000.' };
     const symbol = isSolanaAddress(trade[3]) ? trade[3] : `${trade[3].toUpperCase()}/USD`;
-    if (!isSolanaAsset(symbol)) return { kind: 'invalid', reason: 'This workspace supports Solana tokens only. Use a supported Solana asset or its exact mint address.' };
+    if (!isSolanaAsset(symbol)) return { kind: 'invalid', reason: 'This workspace supports Solana tokens only. Use a supported Solana asset or its exact WGT address.' };
     return { kind: 'trade', side: trade[1].toUpperCase() as 'BUY' | 'SELL', amountCents, symbol };
   }
-  return { kind: 'invalid', reason: 'Try “Help”, “Status”, “Check trade”, “Revoke trading”, or “Stop all”. Use “Buy 0.1 SOL of <mint>” or “Sell 100 of <mint>”. Chat execution needs a funded dedicated wallet and active signed permission. Otherwise approve swaps on the website. Configure token alerts on the website.' };
+  return { kind: 'invalid', reason: 'Try “Help”, “Status”, “Check trade”, “Revoke trading”, or “Stop all”. Use “Buy 0.1 SOL of <WGT>” or “Sell 100 of <WGT>”. Chat execution needs a funded dedicated wallet and active signed permission. Otherwise approve swaps on the website. Configure token alerts on the website.' };
 }
