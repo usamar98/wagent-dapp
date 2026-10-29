@@ -5,6 +5,7 @@ import { canFundWithWallet, fundSolanaWallet, solFundingLamports, walletLabel, t
 import { walletError } from './wallet';
 import { Notice } from './solana-ui';
 import s from './solana.module.css';
+import { useTokenIdentities } from './token-identity';
 
 export type TradingBalance = { sol: string; tokens: { mint: string; amount: string }[] };
 type Deposit = { from: string; to: string; amount: string; lamports: string; feeSol: string; ownerBalanceSol: string; transaction: string; expiresAt: string };
@@ -14,6 +15,7 @@ export function TradingFunding({ address, ownerAddress, wallet, balances, balanc
   const [amount, setAmount] = useState(''), [quote, setQuote] = useState<Deposit | null>(null), [signature, setSignature] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [uncertain, setUncertain] = useState(false), [copied, setCopied] = useState(false);
   const sending = useRef(false);
+  const tokenInfo = useTokenIdentities(balances?.tokens.map(t=>t.mint)||[]);
   const hasFunds = !balanceError && Number(balances?.sol) > 0;
   useEffect(() => { setQuote(null); setSignature(''); setUncertain(false); }, [address, ownerAddress, wallet]);
   async function review(event: FormEvent) {
@@ -41,7 +43,7 @@ export function TradingFunding({ address, ownerAddress, wallet, balances, balanc
       {quote && <div className={s.permissionReview}><h3>Review your deposit</h3><dl className={s.quoteDetails}><div><dt>SOL to add</dt><dd>{quote.amount} SOL</dd></div><div><dt>Estimated network fee</dt><dd>{quote.feeSol} SOL</dd></div><div><dt>In your owner wallet</dt><dd>{quote.ownerBalanceSol} SOL</dd></div></dl><p className={s.fine}>From your owner wallet: <code>{quote.from}</code><br/>To your Wagent trading wallet: <code>{quote.to}</code></p><button className={s.button} disabled={busy || !wallet} onClick={() => void deposit()}>Approve deposit in {wallet ? walletLabel(wallet) : 'wallet'}</button><p className={s.fine}>Review the amount and recipient in your wallet. This transfer does not enable WhatsApp spending.</p></div>}
     </>}
     <details className={s.setupDetails}><summary>Transfer from Binance Exchange or another wallet</summary><p>Withdraw native SOL using the Solana network to this address. Check the address, fee, and withdrawal minimum. Send a small test first. Cash and other networks are not supported here.</p><label className={s.field}>Deposit address · Solana mainnet<code className={s.depositAddress}>{address}</code></label><button className={`${s.button} ${s.secondary}`} onClick={() => void navigator.clipboard.writeText(address).then(() => setCopied(true)).catch(() => setError('Could not copy the address. Select and copy it manually.'))}><Copy size={14}/>{copied ? 'Address copied' : 'Copy deposit address'}</button></details>
-    {balances && balances.tokens.length > 0 && <details className={s.setupDetails}><summary>Tokens in this trading wallet ({balances.tokens.length})</summary>{balances.tokens.map((token, i) => <p className={s.fine} key={`${token.mint}-${i}`}>{token.amount} tokens <code>{token.mint}</code></p>)}</details>}
+    {balances && balances.tokens.length > 0 && <details className={s.setupDetails}><summary>Tokens in this trading wallet ({balances.tokens.length})</summary>{balances.tokens.map((token, i) => <p className={s.fine} key={`${token.mint}-${i}`}>{token.amount} {tokenInfo.find(t=>t.mint===token.mint)?.symbol||'tokens'} <code>{token.mint}</code></p>)}</details>}
     <button className={`${s.button} ${hasFunds ? '' : s.secondary}`} disabled={busy} onClick={onContinue}>{hasFunds ? 'Continue to trading limits' : 'Set limits before adding SOL'}<ArrowRight size={15}/></button>
   </div>;
 }

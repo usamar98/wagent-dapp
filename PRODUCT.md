@@ -23,4 +23,6 @@ Lead with agent creation and WhatsApp pairing. Keep network, mint identity, liqu
 WhatsApp trading offers explicit owner-signed token access: any supported Solana token, or selected saved mints. One any-token approval allows later exact-mint commands until expiry or revocation, within unchanged budget and transaction protections. Existing grants stay restricted until the owner signs broader access. Saving individual mints is optional for any-token setup. No approval signs or funds a trade on its own.
 
 ## Accessibility & Inclusion
+
+Portfolio displays real Solana balances and DEX Screener estimates for both the dedicated trading wallet and verified owner wallet. Missing prices remain unavailable. Dedicated-wallet sales on the website require a fresh, session-bound owner signature authorizing one exact reviewed transaction, preserving the existing route, simulation, fee, expiry, emergency-stop and replay protections. Sale proceeds remain in the same trading wallet. Symbol labels always retain the exact token address as the identity.
 Keyboard navigation, semantic controls, visible focus, readable contrast, reduced-motion support, responsive mobile workflows.

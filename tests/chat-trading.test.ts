@@ -29,9 +29,14 @@ function unsigned(side:string,amount:string,out:string,badInput=false,mint=MINT,
   const accounts=Buffer.from([0,1,2,3,4,6,6,2,5,5]),message=Buffer.concat([Buffer.from([1,0,2,addresses.length]),...addresses.map(a=>Buffer.from(bs58.decode(a))),Buffer.alloc(32),Buffer.from([1,5,accounts.length]),accounts,Buffer.from([data.length]),data]);
   return Buffer.concat([Buffer.from([1]),Buffer.alloc(64),message]).toString('base64');
 }
-function provider(options:{timeout?:boolean;badInput?:boolean;overdraw?:boolean;delegate?:boolean;onOrder?:()=>Promise<void>;onSubmit?:()=>Promise<void>;unknown?:boolean;badMinimum?:boolean;badRouteMinimum?:boolean;feeBps?:number;router?:string}={}){
+function provider(options:{timeout?:boolean;badInput?:boolean;overdraw?:boolean;delegate?:boolean;onOrder?:()=>Promise<void>;onSubmit?:()=>Promise<void>;unknown?:boolean;badMinimum?:boolean;badRouteMinimum?:boolean;feeBps?:number;router?:string;portfolio?:boolean;priceFailure?:boolean;missingPrice?:boolean;largeBalance?:boolean}={}){
   let submissions=0,withdrawals=0,side='BUY',input='10000000',output='1000000',lastWire='',mint=MINT;const sent:string[]=[];
   const mock=vi.fn(async(url:any,init?:any):Promise<Response>=>{
+    if(String(url).includes('api.dexscreener.com')){
+      if(options.priceFailure)throw Error('Price fixture unavailable');
+      const requested=new URL(url).pathname.split('/').at(-1)!.split(',');
+      return Response.json([{id:SOL,symbol:'SOL',price:'100'},{id:MINT,symbol:'JUP',price:'2'},{id:OTHER,symbol:'USDC',price:'3'}].filter(t=>requested.includes(t.id)&&(!options.missingPrice||t.id!==OTHER)).map(t=>({chainId:'solana',pairAddress:MINT,dexId:'fixture',baseToken:{address:t.id,name:t.symbol,symbol:t.symbol},priceUsd:t.price,liquidity:{usd:100000}})));
+    }
     if(String(url).includes('/tokens/v2/'))return Response.json([{id:new URL(url).searchParams.get('query'),name:'Fixture',symbol:'TEST',decimals:6}]);
     if(String(url).includes('/swap/v2/order')){const p=new URL(url).searchParams;side=p.get('inputMint')===SOL?'BUY':'SELL';mint=p.get(side==='BUY'?'outputMint':'inputMint')!;input=p.get('amount')!;output=side==='BUY'?'1000000':'10000000';lastWire=unsigned(side,input,output,options.badInput,mint,options.feeBps,options.badRouteMinimum);if(options.onOrder)await options.onOrder();return Response.json({requestId:randomUUID(),transaction:lastWire,inputMint:p.get('inputMint'),outputMint:p.get('outputMint'),inAmount:input,outAmount:output,otherAmountThreshold:String(BigInt(output)*99n/100n),router:options.router??'metis',slippageBps:100,feeBps:options.feeBps??0,feeMint:SOL,lastValidBlockHeight:'100',signatureFeePayer:tradingAddress});}
     if(String(url).includes('/swap/v2/execute')){submissions++;const signed=JSON.parse(init.body).signedTransaction,tx=getTransactionDecoder().decode(Buffer.from(signed,'base64'));const {validateSignedSwap}=await import('../server/solana-swaps.js');const signature=validateSignedSwap(lastWire,signed,tradingAddress);expect(Object.keys(tx.signatures)).toEqual([tradingAddress]);sent.push(signed);if(options.onSubmit)await options.onSubmit();if(options.timeout)throw new Error('timeout');return Response.json({status:'Success',code:0,signature});}
@@ -42,13 +47,16 @@ function provider(options:{timeout?:boolean;badInput?:boolean;overdraw?:boolean;
     if(method==='simulateTransaction'){
       const tx=getTransactionDecoder().decode(Buffer.from(payload.params[0],'base64')),message=getCompiledTransactionMessageDecoder().decode(tx.messageBytes);if(message.version===1)throw new Error('Unsupported fixture version');const isSwap=message.staticAccounts.includes(JUP as any);
       if(!isSwap){const ix=message.instructions.at(-1)!,data=Buffer.from(ix.data||[]),isSol=message.staticAccounts[ix.programAddressIndex]===SYSTEM,amount=isSol?data.readBigUInt64LE(4):0n;return Response.json({result:{value:{err:null,accounts:[systemAccount(1000000000-Number(amount)-5000)]}}});}
-      const native=side==='BUY'?1000000000-Number(input)-5000:1000000000+Number(output)-5000;
+      const native=side==='BUY'?1000000000-Number(input)-5000:1000000000+(options.badMinimum?0:Number(output))-5000;
       return Response.json({result:{value:{err:null,accounts:payload.params[1].accounts.addresses.map((a:string)=>a===tradingAddress?systemAccount(native-(options.overdraw?10000000:0)):a===source?tokenData(side==='BUY'?SOL:mint,side==='BUY'?0n:100000000n-BigInt(input)):tokenData(side==='BUY'?mint:SOL,side==='BUY'?(options.badMinimum?0n:BigInt(output)):0n,options.delegate?1:0))}}});
     }
     if(method==='getSignatureStatuses')return Response.json({result:{value:[options.unknown?null:{err:null,confirmationStatus:'confirmed'}]}});
     if(method==='getBlockHeight')return Response.json({result:1000});
     if(method==='getLatestBlockhash')return Response.json({result:{value:{blockhash:bs58.encode(randomBytes(32)),lastValidBlockHeight:100}}});
-    if(method==='getTokenAccountsByOwner')return Response.json({result:{value:payload.params[1].mint?[{pubkey:source,account:{owner:TOKEN,data:{parsed:{info:{owner:tradingAddress,mint,tokenAmount:{amount:'100000000',decimals:6}}}}}}]:[]}});
+    if(method==='getTokenAccountsByOwner'){
+      if(options.portfolio&&payload.params[1].programId){const program=payload.params[1].programId,rows=program===TOKEN?[[MINT,options.largeBalance?'9007199254740993':'3000000'],[MINT,options.largeBalance?'2':'2000000']]:[[OTHER,'2000000']];return Response.json({result:{value:rows.map(([id,amount],i)=>({pubkey:program===TOKEN?(i?destination:source):OTHER,account:{owner:program,data:{parsed:{info:{owner:payload.params[0],mint:id,tokenAmount:{amount,decimals:6}}}}}}))}});}
+      return Response.json({result:{value:payload.params[1].mint?[{pubkey:source,account:{owner:TOKEN,data:{parsed:{info:{owner:tradingAddress,mint,tokenAmount:{amount:'100000000',decimals:6}}}}}}]:[]}});
+    }
     if(method==='sendTransaction'){withdrawals++;sent.push(payload.params[0]);const tx=getTransactionDecoder().decode(Buffer.from(payload.params[0],'base64'));return Response.json({result:bs58.encode(tx.signatures[tradingAddress as keyof typeof tx.signatures]!)});}
     throw new Error(`Unexpected outbound request ${String(url)} ${method}`);
   });vi.stubGlobal('fetch',mock);return {mock,submissions:()=>submissions,withdrawals:()=>withdrawals,sent};
@@ -63,7 +71,65 @@ beforeAll(async()=>{
   const created=await post('/wallet',{consent:true});expect(created.status).toBe(201);tradingAddress=created.body.address;
 });
 beforeEach(async()=>{vi.unstubAllGlobals();headers['X-Vercel-Forwarded-For']=`198.51.100.${++testIp}`;environment.appUrl='http://localhost:5173';process.env.JUPITER_API_KEY='jupiter-test';process.env.SOLANA_SWAPS_ENABLED='true';delete process.env.SOLANA_CHAT_TRADING_ENABLED;await db.solanaChatTrade.deleteMany({where:{userId}});await db.solanaWalletWithdrawal.deleteMany({where:{userId}});await db.agentCommand.deleteMany({where:{userId}});await db.solanaPermissionChallenge.deleteMany({where:{userId}});await db.solanaTradePermission.deleteMany({where:{userId}});await db.user.update({where:{id:userId},data:{emergencyStop:false}});await db.personalAgentChannel.update({where:{id:channel.id},data:{appUrl:null,tokenFingerprint:'fixture-key-fingerprint',ownerId:'user:owner',enabled:true,leaseToken:'test-lease',leaseUntil:new Date(Date.now()+3600000)}});channelRuntime.clearWebsiteRuntimeCache();});
+beforeEach(async()=>{await db.solanaSwap.deleteMany({where:{userId}});const {clearTokenCache}=await import('../server/solana.js');clearTokenCache();});
 afterEach(()=>vi.unstubAllGlobals());afterAll(async()=>{await db?.close();await socket?.stop();await pg?.close();});
+
+describe('private portfolio and one-time owner-approved sales',()=>{
+  const sell=(body:unknown)=>client.post('/api/solana/portfolio/sell/quote').set(headers).send(body);
+  const input=()=>({mint:MINT,amount:'2.5',slippageBps:100,requestId:randomUUID()});
+  const executeSale=(id:string,signature:string)=>client.post(`/api/solana/portfolio/sell/${id}/execute`).set(headers).send({signature});
+  const ownerProof=(q:any)=>sign(null,Buffer.from(q.message),keys.privateKey).toString('base64');
+  it('isolates wallet addresses, merges token accounts exactly, and values only real balances',async()=>{
+    const p=provider({portfolio:true});expect((await request(app).get('/api/solana/portfolio')).status).toBe(401);
+    const privateView=await other.get('/api/solana/portfolio');expect(privateView.body.wallet).toBeNull();expect(p.mock).not.toHaveBeenCalled();
+    const result=await client.get('/api/solana/portfolio?source=TRADING&wallet=attacker');expect(result.status,JSON.stringify(result.body)).toBe(200);
+    expect(result.body.wallet.address).toBe(tradingAddress);expect(result.body.tokens.find((t:any)=>t.mint===MINT)).toMatchObject({amount:'5',rawAmount:'5000000',symbol:'JUP',priceUsd:2,valueUsd:10});
+    expect(result.body.tokens.find((t:any)=>t.mint===OTHER)).toMatchObject({amount:'2',symbol:'USDC',valueUsd:6});expect(result.body.totalUsd).toBe(116);expect(result.body.unpricedCount).toBe(0);expect(JSON.stringify(result.body)).not.toMatch(/encryptedSecret|privateKey|authorization/);
+    const owner=await client.get('/api/solana/portfolio?source=OWNER');expect(owner.body.wallet.address).toBe(ownerAddress);
+  });
+  it('keeps unpriced tokens visible and explicitly marks a partial total',async()=>{
+    provider({portfolio:true,missingPrice:true});const result=await client.get('/api/solana/portfolio');expect(result.status).toBe(200);
+    expect(result.body.tokens.find((t:any)=>t.mint===OTHER)).toMatchObject({amount:'2',priceUsd:null,valueUsd:null,symbol:null});expect(result.body.unpricedCount).toBe(1);expect(result.body.totalUsd).toBe(110);
+  });
+  it('returns balances with unavailable values when the pricing provider is down',async()=>{
+    provider({portfolio:true,priceFailure:true});const result=await client.get('/api/solana/portfolio');expect(result.status).toBe(200);expect(result.body.tokens).toHaveLength(2);expect(result.body.totalUsd).toBeNull();expect(result.body.pricingError).toContain('prices');
+  });
+  it('preserves raw token units above the JavaScript integer precision limit',async()=>{
+    provider({portfolio:true,largeBalance:true});const result=await client.get('/api/solana/portfolio');expect(result.body.tokens.find((t:any)=>t.mint===MINT)).toMatchObject({rawAmount:'9007199254740995',amount:'9007199254.740995'});
+  });
+  it('requires the original owner proof and executes one reviewed sale only once',async()=>{
+    const p=provider(),q=await sell(input());expect(q.status,JSON.stringify(q.body)).toBe(201);expect(q.body.ownerAddress).toBe(ownerAddress);expect(q.body.walletAddress).toBe(tradingAddress);expect(q.body.message).toContain('one-time token sale');expect(q.body.message).toContain(MINT);expect(q.body.quote.from.symbol).toBe('TEST');
+    expect(JSON.stringify((await client.get('/api/solana/swaps')).body)).not.toMatch(/sessionId|orderData|authorization/);
+    expect((await executeSale(q.body.id,randomBytes(64).toString('base64'))).status).toBe(400);expect((await other.post(`/api/solana/portfolio/sell/${q.body.id}/execute`).set(headers).send({signature:ownerProof(q.body)})).status).toBe(404);expect(p.submissions()).toBe(0);
+    const result=await executeSale(q.body.id,ownerProof(q.body));expect(result.status,JSON.stringify(result.body)).toBe(200);expect(result.body.status).toBe('CONFIRMED');expect(p.submissions()).toBe(1);
+    await executeSale(q.body.id,ownerProof(q.body));expect(p.submissions()).toBe(1);
+  });
+  it('rejects changed sessions, expired reviews and emergency stop without a submission',async()=>{
+    const p=provider(),q=await sell(input()),stored=await db.solanaSwap.findUniqueOrThrow({where:{id:q.body.id}});
+    await db.solanaSwap.update({where:{id:stored.id},data:{quote:{...stored.quote,authorization:{...stored.quote.authorization,sessionId:'changed'}}}});expect((await executeSale(q.body.id,ownerProof(q.body))).status).toBe(409);
+    const expired=await sell(input());await db.solanaSwap.update({where:{id:expired.body.id},data:{expiresAt:new Date(0)}});expect((await executeSale(expired.body.id,ownerProof(expired.body))).status).toBe(409);
+    const stopped=await sell(input());await client.post('/api/emergency-stop').set(headers).send({});expect((await executeSale(stopped.body.id,ownerProof(stopped.body))).body.status).toBe('CANCELLED');expect(p.submissions()).toBe(0);
+  });
+  it('submits concurrent copies of the same owner approval at most once',async()=>{
+    const p=provider(),q=await sell(input()),proof=ownerProof(q.body);const responses=await Promise.all([executeSale(q.body.id,proof),executeSale(q.body.id,proof)]);expect(responses.some(r=>r.status===200)).toBe(true);expect(p.submissions()).toBe(1);
+  });
+  it('invalidates the old review when preparing another sale',async()=>{
+    const p=provider(),first=await sell(input()),second=await sell(input());expect((await executeSale(first.body.id,ownerProof(first.body))).body.status).toBe('CANCELLED');expect(p.submissions()).toBe(0);expect((await executeSale(second.body.id,ownerProof(second.body))).body.status).toBe('CONFIRMED');expect(p.submissions()).toBe(1);
+  });
+  it('rejects a changed owner wallet and amount overrides',async()=>{
+    const p=provider(),q=await sell(input()),proof=ownerProof(q.body);
+    expect((await client.post(`/api/solana/portfolio/sell/${q.body.id}/execute`).set(headers).send({signature:proof,amount:'999'})).status).toBe(400);
+    try{await db.solanaWallet.update({where:{userId},data:{address:OTHER}});expect((await executeSale(q.body.id,proof)).status).toBe(409);expect(p.submissions()).toBe(0);}finally{await db.solanaWallet.update({where:{userId},data:{address:ownerAddress}});}
+  });
+  it.each([{badInput:true},{overdraw:true},{delegate:true},{badMinimum:true},{router:'dflow'}])('keeps transaction validation on portfolio sales %j',async options=>{
+    const p=provider(options);expect((await sell(input())).status).toBe(400);expect(p.submissions()).toBe(0);
+  });
+  it('never resubmits uncertain sales and blocks competing chat trades and withdrawals',async()=>{
+    const p=provider({timeout:true}),q=await sell(input());expect((await executeSale(q.body.id,ownerProof(q.body))).body.status).toBe('UNKNOWN');await executeSale(q.body.id,ownerProof(q.body));expect(p.submissions()).toBe(1);
+    expect((await sell(input())).status).toBe(409);await grant(anyTokens);expect((await chat(`Buy 0.001 SOL of ${MINT}`)).command.reply).toContain('website swap');expect((await post('/withdrawal/challenge',{mint:SOL,amount:'0.001'})).status).toBe(409);
+    expect((await client.post(`/api/solana/swaps/${q.body.id}/reconcile`).set(headers).send({})).body.status).toBe('CONFIRMED');expect(p.submissions()).toBe(1);
+  });
+});
 
 describe('chat trading agent setup',()=>{
   async function withAgent(symbols:string[],work:(agent:any)=>Promise<void>){

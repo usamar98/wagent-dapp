@@ -23,6 +23,8 @@ import { registerProductionWebsite } from './website-runtime.js';
 import { solanaPermissionsRouter, revokeTrading } from './solana-permissions.js';
 import { chatExecutionRouter } from './solana-chat-trading.js';
 import { solanaWithdrawalRouter } from './solana-withdrawals.js';
+import { solanaPortfolioRouter } from './solana-portfolio.js';
+import { portfolioSellsRouter } from './portfolio-sells.js';
 import { solanaFundingRouter } from './solana-funding.js';
 import { cloudWorkerRouter } from './cloud-worker.js';
 
@@ -71,6 +73,8 @@ app.use('/api/solana', solanaPermissionsRouter);
 app.use('/api/solana/chat-trading', solanaWithdrawalRouter);
 app.use('/api/solana/chat-trading', solanaFundingRouter);
 app.use('/api/solana', solanaRouter);
+app.use('/api/solana/portfolio', solanaPortfolioRouter);
+app.use('/api/solana/portfolio', portfolioSellsRouter);
 app.use('/api/solana', solanaSwapsRouter);
 app.use('/api/solana', solanaAlertsRouter);
 app.use('/api/auth/wallet',walletAuth);

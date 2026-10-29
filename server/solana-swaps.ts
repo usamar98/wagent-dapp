@@ -39,7 +39,7 @@ export function validateSignedSwap(unsigned:string,signed:string,wallet:string){
   }
   return bs58.encode(tx.signatures[wallet as keyof typeof tx.signatures]!);
 }
-function view(swap:Swap,includeTransaction=false){const {unsignedTransaction,providerRequestId,userId,...rest}=swap;return {...rest,...(includeTransaction&&swap.status==='QUOTED'&&swap.expiresAt>new Date()?{transaction:unsignedTransaction}:{})};}
+function view(swap:Swap,includeTransaction=false){const {unsignedTransaction,providerRequestId,userId,...rest}=swap;const {authorization:_authorization,...quote}=swap.quote;return {...rest,quote,...(includeTransaction&&swap.status==='QUOTED'&&swap.expiresAt>new Date()&&!swap.quote.authorization?{transaction:unsignedTransaction}:{})};}
 async function liveUser(tx:Tx,req:Request){
   const userId=req.user!.id;await lockUser(tx,userId);
   const [user,session]=await Promise.all([tx.user.findUnique({where:{id:userId}}),tx.session.findUnique({where:{id:sessionId(req)}})]);

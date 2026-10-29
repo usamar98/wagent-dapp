@@ -3,7 +3,7 @@ import { AppError, check } from './security.js';
 import { isSolanaAddress } from '../shared/solana.js';
 
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
-export const addressSchema = z.string().refine(isSolanaAddress, 'Enter a valid Solana WGT or wallet address.');
+export const addressSchema = z.string().refine(isSolanaAddress, 'Enter a valid Solana token address or wallet address.');
 export function providerStatus() {
   return { jupiter:!!process.env.JUPITER_API_KEY, discovery:'DEX Screener', swapsEnabled:process.env.SOLANA_SWAPS_ENABLED==='true' && !!process.env.JUPITER_API_KEY, alertsEnabled:process.env.SOLANA_ALERTS_ENABLED!=='false' };
 }
@@ -26,7 +26,7 @@ export async function tokenMetadata(mint:string) {
   const raw=await fetchJson(`https://api.jup.ag/tokens/v2/search?query=${encodeURIComponent(mint)}`,{headers:jupiterHeaders()},'Jupiter token data');
   check(Array.isArray(raw)&&raw.length<=100,502,'Jupiter token metadata is unavailable.');
   const result=raw.map(item=>tokenSchema.safeParse(item)).find(item=>item.success&&item.data.id===mint);
-  check(result?.success,400,'Jupiter has not indexed this WGT. A swap cannot be prepared yet.');
+  check(result?.success,400,'Jupiter has not indexed this token address. A swap cannot be prepared yet.');
   if(metadataCache.size>=200)metadataCache.delete(metadataCache.keys().next().value!);
   metadataCache.set(mint,{saved:Date.now(),token:result.data});return result.data;
 }
@@ -48,7 +48,7 @@ function orderFailure(raw:{router?:unknown;errorCode?:unknown},inputMint:string)
   }
   if(raw.router==='jupiterz'){
     if(raw.errorCode===1)return 'The Solana wallet paying for this swap cannot fund it. Check its input-token balance and native SOL for fees.';
-    if(raw.errorCode===2)return 'Jupiter could not find the required token account for this wallet. Check the token WGT address and Solana wallet setup.';
+    if(raw.errorCode===2)return 'Jupiter could not find the required token account for this wallet. Check the token address and Solana wallet setup.';
     if(raw.errorCode===3)return 'Jupiter could not build a transaction for this quote. Request a fresh quote or check whether the token has a supported route.';
   }
   return 'Jupiter cannot prepare this swap. Check token support, the paying Solana wallet’s balance, and SOL for fees. No swap was submitted.';
