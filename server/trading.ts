@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { db, transaction, lockUser, type Tx } from './db.js';
 import { auth, check, AppError } from './security.js';
@@ -17,6 +17,7 @@ import { revokeTrading, validateTradePermission } from './solana-permissions.js'
 import {informationCommand} from './whatsapp-information.js';
 import {isWithdrawalCommand,queueWithdrawalCommand} from './solana-chat-withdrawals.js';
 import {revokeWithdrawals} from './withdrawal-access.js';
+import {tradeCheckCommand,whatsappReviewReason} from './chat-trade-status.js';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const help = 'WAGENT AI · SOLANA · Information: Balance; Portfolio; Token <token address>; Trade history; My limits. Trading: Buy 0.001 SOL of <token address>; Sell 100 of <token address>; Check trade. Withdrawals: Withdraw 0.01 SOL; CONFIRM WITHDRAW <code>; Cancel withdrawal; Check withdrawal. Withdrawals need separate owner-signed permission, a fixed original recipient, limits and expiry. Controls: Revoke trading; Revoke withdrawals; Revoke access; Stop all. Configure permissions and alerts on the website.';
@@ -74,8 +75,8 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
     if (existing) return { command: existing, duplicate: true };
     let reply = '', status = 'COMPLETED', intentId: string | undefined;
     try {
-      if(!env.demo&&source==='WHATSAPP'&&/^check (my )?trade$/i.test(text.trim())){
-        const command=await tx.agentCommand.create({data:{userId,source,externalId,text,reply:'Checking the latest chat trade. No new order is submitted.',status:'CHECK_QUEUED',channelId:channelContext!.id,recipientId:channelContext!.ownerId,deliveryStatus:'PENDING',createdAt:now}});return {command,duplicate:false};
+      if(!env.demo&&source==='WHATSAPP'&&tradeCheckCommand(text)){
+        const command=await tx.agentCommand.create({data:{userId,source,externalId,text,reply:'Checking the referenced request. This check never places or repeats an order.',status:'CHECK_QUEUED',channelId:channelContext!.id,recipientId:channelContext!.ownerId,deliveryStatus:'PENDING',createdAt:now}});return {command,duplicate:false};
       }
       if(!env.demo&&source==='WHATSAPP'&&informationCommand(text)){
         const command=await tx.agentCommand.create({data:{userId,source,externalId,text,reply:'Fetching your information. No order is submitted.',status:'INFO_QUEUED',channelId:channelContext!.id,recipientId:channelContext!.ownerId,deliveryStatus:'PENDING',createdAt:now}});return {command,duplicate:false};
@@ -92,8 +93,9 @@ export async function executeCommand(userId: string, text: string, source: 'WEB'
         check(isSolanaAddress(mint)&&Number(amount)>0,400,'Use a valid token address and positive amount.');
         check(side==='BUY'?tradeLink[3].toLowerCase()==='sol of':tradeLink[3].toLowerCase()==='of',400,'Use Buy <SOL amount> SOL of <token address>, or Sell <token amount> of <token address>.');
         const link=new URL('/trade',website.appUrl);link.search=new URLSearchParams({side,mint,amount}).toString();
-        reply=`SOLANA SWAP REVIEW · ${side==='BUY'?`Spend ${amount} SOL`:`Sell ${amount} tokens`}\nToken address: ${mint}\n${link}\nSign in, review a fresh Jupiter quote, and approve it in your linked Solana wallet. This message does not submit an order. For WhatsApp-only trading, fund and authorize a dedicated wallet on the WhatsApp trading page.${website.swapsEnabled===false?' Jupiter trading setup is still required.':website.swapsEnabled===null?' Website trading status could not be checked; open the link to verify.':''}`;
-        const saved=await tx.agentCommand.create({data:{userId,source,externalId,text,reply,status:'COMPLETED',channelId:channelContext?.id,recipientId:channelContext?.ownerId,deliveryStatus:source==='WHATSAPP'?'PENDING':'NOT_REQUIRED',createdAt:now}});return {command:saved,duplicate:false};
+        const requestId=randomUUID(),reason=source==='WHATSAPP'?await whatsappReviewReason(tx,userId):'This website request requires a wallet-approved swap.';
+        reply=`SOLANA SWAP REVIEW · NOT SUBMITTED · ${side==='BUY'?`Spend ${amount} SOL`:`Sell ${amount} tokens`}\nReason: ${reason}\nRequest reference: ${requestId}\nToken address: ${mint}\n${link}\nSign in, review a fresh Jupiter quote, and approve it in your linked Solana wallet. This message does not submit an order. For WhatsApp-only trading, review and sign permission for your existing dedicated wallet: ${new URL('/chat-trading',website.appUrl)}. Check trade only reads status; it never places or repeats an order.${website.swapsEnabled===false?' Jupiter trading setup is still required.':website.swapsEnabled===null?' Website trading status could not be checked; open the link to verify.':''}`;
+        const saved=await tx.agentCommand.create({data:{id:requestId,userId,source,externalId,text,reply,status:'COMPLETED',channelId:channelContext?.id,recipientId:channelContext?.ownerId,deliveryStatus:source==='WHATSAPP'?'PENDING':'NOT_REQUIRED',createdAt:now}});return {command:saved,duplicate:false};
       }
       const command = parseCommand(text);
       if (command.kind === 'invalid') throw new AppError(400, command.reason);

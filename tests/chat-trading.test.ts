@@ -75,6 +75,34 @@ beforeEach(async()=>{vi.unstubAllGlobals();headers['X-Vercel-Forwarded-For']=`19
 beforeEach(async()=>{await db.solanaSwap.deleteMany({where:{userId}});const {clearTokenCache}=await import('../server/solana.js');clearTokenCache();});
 afterEach(()=>vi.unstubAllGlobals());afterAll(async()=>{await db?.close();await socket?.stop();await pg?.close();});
 
+describe('request-specific read-only trade status',()=>{
+  it('does not report a historical sale as the result of a newer review-only sell',async()=>{
+    await grant(anyTokens);const p=provider(),old=await chat(`Sell 100 of ${MINT}`),trade=await db.solanaChatTrade.findFirst({where:{commandId:old.command.id}});await db.solanaChatTrade.update({where:{id:trade.id},data:{quote:{...trade.quote,tokenSymbol:'JOB'}}});await chat('Revoke trading');
+    const review=await chat(`Sell 83.3 of ${OTHER}`);expect(review.command.reply).toContain('NOT SUBMITTED');expect(review.command.reply).toContain('was revoked');expect(review.command.reply).toContain(review.command.id);
+    const result=await chat('Check trade');expect(result.command.reply).toContain('NO WHATSAPP ORDER SUBMITTED');expect(result.command.reply).toContain(`Sell 83.3 of ${OTHER}`);expect(result.command.reply).not.toContain('JOB');expect(result.command.reply).not.toContain(trade.signature);expect(result.command.reply).not.toContain('TRADE CONFIRMED');expect(p.submissions()).toBe(1);
+  });
+  it('does not return an unrelated historical sale after a newer review-only buy',async()=>{
+    await grant();const p=provider(),old=await chat(`Sell 100 of ${MINT}`),trade=await db.solanaChatTrade.findFirst({where:{commandId:old.command.id}});await post('/revoke');const review=await chat(`Buy 0.0009 SOL of ${OTHER}`),result=await chat('check my trade');expect(result.command.reply).toContain(review.command.id);expect(result.command.reply).toContain('Buy 0.0009 SOL');expect(result.command.reply).not.toContain(trade.id);expect(p.submissions()).toBe(1);
+  });
+  it('reports unsigned and expired permission reasons without contacting a trading provider',async()=>{
+    const p=provider();expect((await chat(`Buy 0.001 SOL of ${MINT}`)).command.reply).toContain('No WhatsApp trading permission has been signed');await grant();await db.solanaTradePermission.updateMany({where:{userId,revokedAt:null},data:{expiresAt:new Date(0)}});expect((await chat(`Buy 0.001 SOL of ${MINT}`)).command.reply).toContain('permission expired');expect(p.mock).not.toHaveBeenCalled();
+  });
+  it('checks an explicitly referenced older trade with the original request date and no new send',async()=>{
+    await grant();const p=provider(),old=await chat(`Buy 0.01 SOL of ${MINT}`),trade=await db.solanaChatTrade.findFirst({where:{commandId:old.command.id}});await post('/revoke');const review=await chat(`Sell 83.3 of ${OTHER}`);const result=await chat(`Check trade ${trade.id}`);expect(result.command.reply).toContain('READ-ONLY TRADE STATUS');expect(result.command.reply).toContain(old.command.createdAt.toISOString());expect(result.command.reply).toContain(trade.id);expect(result.command.reply).not.toContain(review.command.id);expect(p.submissions()).toBe(1);
+    const reviewed=await chat(`Check trade ${review.command.id}`);expect(reviewed.command.reply).toContain('NO WHATSAPP ORDER SUBMITTED');expect(reviewed.command.reply).not.toContain(trade.signature);expect(p.submissions()).toBe(1);
+  });
+  it('keeps an unresolved earlier order clearly separate from the latest rejected retry',async()=>{
+    await grant();const p=provider({timeout:true}),old=await chat(`Buy 0.01 SOL of ${MINT}`);expect(old.command.reply).toContain('PENDING');const blocked=await chat(`Buy 0.02 SOL of ${MINT}`);expect(blocked.command.reply).toContain('needs confirmation');const result=await chat('Check trade');expect(result.command.reply).toContain('NO WHATSAPP ORDER SUBMITTED');expect(result.command.reply).toContain('EARLIER PENDING ORDER');expect(result.command.reply).toContain('TRADE CONFIRMED');expect(result.command.reply).toContain('Buy 0.02 SOL');expect(result.command.reply).toContain('Buy 0.01 SOL');expect(p.submissions()).toBe(1);
+  });
+  it('returns no trade when this paired recipient has no request and rejects foreign references',async()=>{
+    const p=provider();expect((await chat('Check trade')).command.reply).toContain('NO TRADE REQUEST');expect((await chat(`Check trade ${randomUUID()}`)).command.reply).toContain('not found');expect(p.mock).not.toHaveBeenCalled();
+    await grant();const old=await chat(`Buy 0.01 SOL of ${MINT}`),trade=await db.solanaChatTrade.findFirst({where:{commandId:old.command.id}});await db.agentCommand.update({where:{id:old.command.id},data:{recipientId:'user:someone-else'}});const result=await chat('Check trade');expect(result.command.reply).toContain('NO TRADE REQUEST');expect((await chat(`Check trade ${trade.id}`)).command.reply).toContain('not found');expect(p.submissions()).toBe(1);
+  });
+  it('binds delayed status checks to requests existing at the check timestamp',async()=>{
+    provider();const old=await chat(`Buy 0.001 SOL of ${MINT}`),checkResult=await chat('Check trade');await db.agentCommand.create({data:{userId,source:'WHATSAPP',externalId:randomUUID(),text:`Sell 83.3 of ${OTHER}`,reply:'SOLANA SWAP REVIEW',status:'COMPLETED',channelId:channel.id,recipientId:channel.ownerId,createdAt:new Date(checkResult.command.createdAt.getTime()+1000)}});const reply=await (await import('../server/chat-trade-status.js')).tradeStatusReply(checkResult.command);expect(reply).toContain(old.command.id);expect(reply).not.toContain('Sell 83.3');
+  });
+});
+
 describe('WhatsApp information commands',()=>{
   it('returns live SOL balance and token holdings directly without submitting a trade',async()=>{
     const p=provider({portfolio:true});const b=await chat('Balance');expect(b.command.reply).toContain('Native SOL: 1 SOL');expect(b.command.reply).toContain(tradingAddress);expect(b.command.reply).toContain('$100.00');

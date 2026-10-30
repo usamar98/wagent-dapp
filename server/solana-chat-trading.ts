@@ -44,7 +44,7 @@ export async function queueChatTrade(tx:Tx,userId:string,text:string,externalId:
   await tx.solanaChatTrade.create({data:{userId,commandId:command.id,permissionId:permission.id,walletAddress:current.wallet!.address,...swap}});
   return command;
 }
-function tradeReply(trade:ChatTrade){
+export function tradeReply(trade:ChatTrade){
   const prefix=trade.status==='CONFIRMED'?'TRADE CONFIRMED':trade.status==='FAILED'?'TRADE FAILED':trade.status==='CANCELLED'||trade.status==='REJECTED'?'NOT EXECUTED':'CONFIRMATION PENDING';
   const symbol=typeof trade.quote.tokenSymbol==='string'?trade.quote.tokenSymbol.replace(/[\r\n]/g,' ').slice(0,80):'tokens';
   return `${prefix} · ${trade.side==='BUY'?`Buy with ${trade.amount} SOL`:`Sell ${trade.amount} ${symbol}`}\n${symbol!=='tokens'?`Token: ${symbol}\n`:''}Token address: ${trade.mint}\nTrading wallet: ${trade.walletAddress}\n${trade.quote.minimumOutput?`Minimum receive: ${trade.quote.minimumOutput} ${trade.side==='BUY'?symbol:'SOL'}\n`:''}${trade.error?`${trade.error}\n`:''}${trade.signature?`https://solscan.io/tx/${trade.signature}\n`:''}Reference: ${trade.id}${['PREPARED','EXECUTING','UNKNOWN'].includes(trade.status)?'\nDo not resend this order. Send Check trade to check confirmation.':''}`;
@@ -118,8 +118,9 @@ async function processQueuedCommand(command:ModelRows['AgentCommand'],context:Ch
   if(command.status==='WITHDRAWAL_CHECK_QUEUED'){await (await import('./solana-chat-withdrawals.js')).checkChatWithdrawal(command,context);return;}
   if(command.status==='CHECK_QUEUED'){
     const claimed=await transaction(async tx=>{await lockUser(tx,command.userId);await activeChannel(tx,command,context);return (await tx.agentCommand.updateMany({where:{id:command.id,status:'CHECK_QUEUED'},data:{status:'CHECK_PROCESSING'}})).count;});if(!claimed)return;
-    const latest=await db.solanaChatTrade.findFirst({where:{userId:command.userId},orderBy:{createdAt:'desc'}}),trade=latest?await reconcileChatTrade(command.userId,latest.id):null;
-    await db.agentCommand.update({where:{id:command.id},data:{status:'COMPLETED',reply:trade?tradeReply(trade):'No WhatsApp trades have been submitted.'}});return;
+    let reply:string,status='COMPLETED';
+    try{reply=await (await import('./chat-trade-status.js')).tradeStatusReply(command);}catch(e){status='REJECTED';reply=`TRADE STATUS UNAVAILABLE · ${e instanceof AppError?e.message:'Status could not be refreshed. No new order was submitted. Try Check trade again.'}`;}
+    await transaction(async tx=>{await lockUser(tx,command.userId);await activeChannel(tx,command,context);await tx.agentCommand.update({where:{id:command.id},data:{status,reply}});});return;
   }
   await executeQueuedTrade(command.id,context);
 }

@@ -9,10 +9,13 @@ All commands must come from the creator in their paired personal WhatsApp agent 
 | `Token <address>` or `Token details <address>` | Exact-address DEX Screener data: ticker/name, price, 24h change/volume, liquidity, market cap and pool creation time where indexed. |
 | `Trade history` | Five recent Wagent buys/sells for the selected user wallet, statuses and transaction links. This is not all wallet activity. |
 | `My limits` | Independent trading/withdrawal status, limits, remaining UTC daily budgets, reserved fees and expiry. |
-| `Check trade` | Read-only reconciliation of the latest chat trade. |
+| `Check trade` | Checks the latest buy/sell request in this paired chat. Review-only or rejected requests show that no WhatsApp order was submitted. An unrelated historical confirmation is never used as their result. |
+| `Check trade <reference>` | Checks a particular trade or request reference, with its original request timestamp. It never submits or repeats an order. |
 | `Help` | Commands and permission requirements. |
 
 USD values are estimates from indexed pools. Missing metrics stay unavailable; cached data keeps its original timestamp. Pool creation time is not token creation time or a safety endorsement. No external API key is added for these information commands.
+
+A website review link does not place an order. If chat trading permission is absent, revoked or expired, the review explains why and links directly to reviewing/signing new permission for the existing trading wallet. Reactivating permission never executes old review requests automatically. Send a fresh buy/sell command after approval. If a rejected retry was blocked by an unresolved earlier order, Check trade clearly separates the rejected request from the earlier order's status.
 
 ## Approve WhatsApp withdrawals once
 
