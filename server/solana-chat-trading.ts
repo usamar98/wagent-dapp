@@ -21,12 +21,13 @@ export function parseChatSwap(text:string){
   check(side==='BUY'?match[3].toLowerCase()==='sol of':match[3].toLowerCase()==='of',400,'Use Buy <SOL amount> SOL of <token address>, or Sell <token amount> of <token address>.');
   return {side,amount:match[2],mint:match[4]};
 }
-export async function noPendingChatTrade(tx:Tx,userId:string,excludeId=''){
+export async function noPendingChatTrade(tx:Tx,userId:string,excludeId='',excludeWithdrawal=''){
   check(!await tx.solanaChatTrade.findFirst({where:{userId,id:{not:excludeId},status:{in:unresolvedChatTrades}}}),409,'A chat trade still needs confirmation. Send Check trade before placing another order.');
   check(!await tx.solanaWalletWithdrawal.findFirst({where:{userId,status:{in:['PREPARED','EXECUTING','UNKNOWN']}}}),409,'A withdrawal still needs confirmation. Check it before trading again.');
   check(!await tx.solanaSwap.findFirst({where:{userId,status:{in:['EXECUTING','UNKNOWN']}}}),409,'A website swap still needs confirmation. Check its status in Portfolio before trading again.');
+  check(!await tx.solanaChatWithdrawal.findFirst({where:{userId,id:{not:excludeWithdrawal},status:{in:['PREPARING','PREPARED','EXECUTING','UNKNOWN']}}}),409,'A WhatsApp withdrawal still needs confirmation. Send Check withdrawal before submitting another operation.');
 }
-async function activeChannel(tx:Tx,command:ModelRows['AgentCommand'],context:ChannelContext){
+export async function activeChannel(tx:Tx,command:ModelRows['AgentCommand'],context:ChannelContext){
   const channel=await tx.personalAgentChannel.findFirst({where:{id:context.id,userId:command.userId,ownerId:context.ownerId,enabled:true,leaseToken:context.leaseToken}});
   check(command.source==='WHATSAPP'&&command.channelId===context.id&&command.recipientId===context.ownerId&&channel?.leaseUntil&&channel.leaseUntil>new Date(),403,'The paired WhatsApp connection changed or its lease expired.');
   check(command.createdAt.getTime()>Date.now()-120000,409,'This trade command is too old. Send a fresh command.');return channel;
@@ -110,6 +111,18 @@ async function executeQueuedTrade(commandId:string,context:ChannelContext){
   }
   await finishCommand(commandId,await db.solanaChatTrade.findUniqueOrThrow({where:{id:trade.id}}));
 }
+export const queuedChatStates=['TRADE_QUEUED','CHECK_QUEUED','INFO_QUEUED','WITHDRAWAL_QUEUED','WITHDRAWAL_CHECK_QUEUED'];
+async function processQueuedCommand(command:ModelRows['AgentCommand'],context:ChannelContext){
+  if(command.status==='INFO_QUEUED'){await (await import('./whatsapp-information.js')).completeInformation(command,context);return;}
+  if(command.status==='WITHDRAWAL_QUEUED'){await (await import('./solana-chat-withdrawals.js')).executeChatWithdrawal(command,context);return;}
+  if(command.status==='WITHDRAWAL_CHECK_QUEUED'){await (await import('./solana-chat-withdrawals.js')).checkChatWithdrawal(command,context);return;}
+  if(command.status==='CHECK_QUEUED'){
+    const claimed=await transaction(async tx=>{await lockUser(tx,command.userId);await activeChannel(tx,command,context);return (await tx.agentCommand.updateMany({where:{id:command.id,status:'CHECK_QUEUED'},data:{status:'CHECK_PROCESSING'}})).count;});if(!claimed)return;
+    const latest=await db.solanaChatTrade.findFirst({where:{userId:command.userId},orderBy:{createdAt:'desc'}}),trade=latest?await reconcileChatTrade(command.userId,latest.id):null;
+    await db.agentCommand.update({where:{id:command.id},data:{status:'COMPLETED',reply:trade?tradeReply(trade):'No WhatsApp trades have been submitted.'}});return;
+  }
+  await executeQueuedTrade(command.id,context);
+}
 const dispatchInput=z.object({commandId:z.uuid(),channelId:z.uuid(),leaseToken:z.string().min(1).max(100),at:z.number().int()}).strict();
 export const chatExecutionRouter=Router();
 chatExecutionRouter.post('/chat-trading/execute-command',async(req,res)=>{
@@ -118,26 +131,13 @@ chatExecutionRouter.post('/chat-trading/execute-command',async(req,res)=>{
   const channel=await db.personalAgentChannel.findUnique({where:{id:input.channelId}});check(channel?.enabled&&channel.ownerId&&channel.userId===command.userId,403,'WhatsApp connection is unavailable.');
   check(verifyHmac(Buffer.from(JSON.stringify(input)),req.get('x-wagent-worker-signature')||'',decrypt(channel.encryptedToken)),403,'Worker signature rejected.');
   const website=await channelWebsiteRuntime(channel.appUrl);check(website.appUrl===websiteOrigin(env.appUrl),403,'This command belongs to a different website.');
-  const context={id:channel.id,ownerId:channel.ownerId,leaseToken:input.leaseToken};
-  if(command.status==='CHECK_QUEUED'){
-    await transaction(async tx=>{await lockUser(tx,command.userId);await activeChannel(tx,command,context);await tx.agentCommand.updateMany({where:{id:command.id,status:'CHECK_QUEUED'},data:{status:'CHECK_PROCESSING'}});});
-    const latest=await db.solanaChatTrade.findFirst({where:{userId:command.userId},orderBy:{createdAt:'desc'}});
-    const trade=latest?await reconcileChatTrade(command.userId,latest.id):null;
-    await db.agentCommand.update({where:{id:command.id},data:{status:'COMPLETED',reply:trade?tradeReply(trade):'No WhatsApp trades have been submitted.'}});
-  }else await executeQueuedTrade(command.id,context);
-  res.json({ok:true});
+  await processQueuedCommand(command,{id:channel.id,ownerId:channel.ownerId,leaseToken:input.leaseToken});res.json({ok:true});
 });
 export async function dispatchChatCommand(command:ModelRows['AgentCommand'],context:ChannelContext,origin:string){
-  if(!['TRADE_QUEUED','CHECK_QUEUED'].includes(command.status))return command;
+  if(!queuedChatStates.includes(command.status))return command;
   try{
-    if(origin===websiteOrigin(env.appUrl)){
-      if(command.status==='TRADE_QUEUED')await executeQueuedTrade(command.id,context);
-      else{
-        await transaction(async tx=>{await lockUser(tx,command.userId);await activeChannel(tx,command,context);});
-        const latest=await db.solanaChatTrade.findFirst({where:{userId:command.userId},orderBy:{createdAt:'desc'}}),trade=latest?await reconcileChatTrade(command.userId,latest.id):null;
-        await db.agentCommand.update({where:{id:command.id},data:{status:'COMPLETED',reply:trade?tradeReply(trade):'No WhatsApp trades have been submitted.'}});
-      }
-    }else{
+    if(origin===websiteOrigin(env.appUrl))await processQueuedCommand(command,context);
+    else{
       const channel=await db.personalAgentChannel.findUniqueOrThrow({where:{id:context.id}});
       const body={commandId:command.id,channelId:context.id,leaseToken:context.leaseToken,at:Date.now()},signature='sha256='+createHmac('sha256',decrypt(channel.encryptedToken)).update(JSON.stringify(body)).digest('hex');
       await fetchJson(new URL('/api/solana/chat-trading/execute-command',origin).toString(),{method:'POST',headers:{'Content-Type':'application/json','X-AgentBazaar':'1','X-Wagent-Worker-Signature':signature},body:JSON.stringify(body)},'Trading website',80000);
@@ -145,9 +145,10 @@ export async function dispatchChatCommand(command:ModelRows['AgentCommand'],cont
   }catch{
     await transaction(async tx=>{
       await lockUser(tx,command.userId);const saved=await tx.agentCommand.findUniqueOrThrow({where:{id:command.id}});
-      if(['TRADE_QUEUED','CHECK_QUEUED'].includes(saved.status)){
-        await tx.agentCommand.update({where:{id:saved.id},data:{status:'REJECTED',reply:'NOT EXECUTED · The trading website could not accept this request. Send Check trade before placing another order.'}});
+      if(queuedChatStates.includes(saved.status)||['INFO_PROCESSING','CHECK_PROCESSING','WITHDRAWAL_CHECK_PROCESSING'].includes(saved.status)){
+        await tx.agentCommand.update({where:{id:saved.id},data:{status:'REJECTED',reply:'REQUEST NOT COMPLETED · The connected website could not finish this request. Send Check withdrawal or Check trade before repeating a financial command.'}});
         await tx.solanaChatTrade.updateMany({where:{commandId:saved.id,status:'PREPARING'},data:{status:'CANCELLED',error:'Website dispatch was not accepted.'}});
+        await tx.solanaChatWithdrawal.updateMany({where:{executeCommandId:saved.id,status:'PREPARING'},data:{status:'CANCELLED',error:'Website dispatch was not accepted.'}});
       }
     });
   }

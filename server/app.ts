@@ -27,6 +27,7 @@ import { solanaPortfolioRouter } from './solana-portfolio.js';
 import { portfolioSellsRouter } from './portfolio-sells.js';
 import { solanaFundingRouter } from './solana-funding.js';
 import { cloudWorkerRouter } from './cloud-worker.js';
+import {withdrawalPermissionsRouter} from './solana-withdrawal-permissions.js';
 
 export const app=express();
 app.disable('x-powered-by');
@@ -70,6 +71,7 @@ app.use('/api/trading', tradingRouter);
 app.use('/api/whatsapp-agent', personalWhatsAppRouter);
 app.use('/api/solana', chatExecutionRouter);
 app.use('/api/solana', solanaPermissionsRouter);
+app.use('/api/solana/chat-trading/withdrawal-permission', withdrawalPermissionsRouter);
 app.use('/api/solana/chat-trading', solanaWithdrawalRouter);
 app.use('/api/solana/chat-trading', solanaFundingRouter);
 app.use('/api/solana', solanaRouter);

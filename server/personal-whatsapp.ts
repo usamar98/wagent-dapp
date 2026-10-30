@@ -1,3 +1,4 @@
+import {revokeWithdrawals} from './withdrawal-access.js';
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
@@ -139,7 +140,7 @@ personalWhatsAppRouter.post('/', async (req, res) => {
   await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
     const data = { appUrl:websiteOrigin(env.appUrl),label: input.label, encryptedToken: encrypt(input.apiKey), tokenFingerprint: hash(input.apiKey), ownerId: null, agentId: null, pairingHash: hash(code), pairingExpiresAt: new Date(Date.now() + 10 * 60000), enabled: true, offset: '0', leaseToken: null, leaseUntil: null, nextPollAt: new Date(), lastError: null, lastPollAt: null, lastMessageAt: null, createdAt: new Date(), consentAt: new Date() };
-    await revokeTrading(tx,userId,'Replacing the WhatsApp connection revoked chat trading permission.');
+    await revokeTrading(tx,userId,'Replacing the WhatsApp connection revoked chat trading permission.');await revokeWithdrawals(tx,userId,'Replacing the WhatsApp connection revoked chat trading permission.');
     const previous = await tx.personalAgentChannel.findUnique({ where: { userId } });
     if (previous) await tx.agentCommand.updateMany({ where: { channelId: previous.id, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'CANCELLED' } });
     await tx.personalAgentChannel.upsert({ where: { userId }, create: { userId, ...data }, update: data });
@@ -160,7 +161,7 @@ personalWhatsAppRouter.post('/pairing', async (req, res) => {
 personalWhatsAppRouter.post('/disconnect', async (req, res) => {
   await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
-    await revokeTrading(tx,userId,'Disconnecting WhatsApp revoked chat trading permission.');
+    await revokeTrading(tx,userId,'Disconnecting WhatsApp revoked chat trading permission.');await revokeWithdrawals(tx,userId,'Disconnecting WhatsApp revoked chat trading permission.');
     const channel = await tx.personalAgentChannel.findUnique({ where: { userId } });
     if (channel) {
       await tx.agentCommand.updateMany({ where: { channelId: channel.id, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'CANCELLED' } });

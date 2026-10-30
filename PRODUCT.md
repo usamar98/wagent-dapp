@@ -24,5 +24,7 @@ WhatsApp trading offers explicit owner-signed token access: any supported Solana
 
 ## Accessibility & Inclusion
 
+The paired WhatsApp chat answers Balance, Portfolio, Token <address>, Trade history, and My limits with live on-chain balances or explicitly dated DEX Screener estimates. Native SOL withdrawals use an independently signed, expiring permission bound to the original Solana owner and paired chat. A request previews the fixed recipient and amount, then requires its unique confirmation code within two minutes. Amount plus the reserved fee cap counts against per-withdrawal and UTC daily budgets; failures and uncertain submissions retain their reservation. Revocation, connection changes, owner changes and emergency stop block new sends. Unknown results are reconciled read-only and never automatically resent. Existing trading grants do not authorize withdrawals.
+
 Portfolio displays real Solana balances and DEX Screener estimates for both the dedicated trading wallet and verified owner wallet. Missing prices remain unavailable. Dedicated-wallet sales on the website require a fresh, session-bound owner signature authorizing one exact reviewed transaction, preserving the existing route, simulation, fee, expiry, emergency-stop and replay protections. Sale proceeds remain in the same trading wallet. Symbol labels always retain the exact token address as the identity.
 Keyboard navigation, semantic controls, visible focus, readable contrast, reduced-motion support, responsive mobile workflows.

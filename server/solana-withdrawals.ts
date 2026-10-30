@@ -11,6 +11,7 @@ import { noPendingChatTrade, reconcileChatTrade } from './solana-chat-trading.js
 import { SYSTEM_PROGRAM, TOKEN_PROGRAM, TOKEN_2022, ASSOCIATED_PROGRAM } from './chat-transaction-policy.js';
 import { signTradingTransaction } from './trading-wallet-keys.js';
 import { verifySolanaSignature, decodeSwapTransaction } from './solana-swaps.js';
+import {revokeWithdrawals} from './withdrawal-access.js';
 
 const MAX_WITHDRAWAL_FEE=10000000n;
 function short(value:number){const bytes:number[]=[];do{const next=value&127;value>>>=7;bytes.push(next|(value?128:0));}while(value);return Buffer.from(bytes);}
@@ -26,7 +27,7 @@ export function solTransferWire(from:string,to:string,amount:string,blockhash:st
   const data=Buffer.alloc(12);data.writeUInt32LE(2);data.writeBigUInt64LE(BigInt(amount),4);
   return wire(from,blockhash,[{program:SYSTEM_PROGRAM,accounts:[from,to],data}],SOL_MINT);
 }
-export async function buildWithdrawal(wallet:string,owner:string,mint:string,value:string){
+export async function buildWithdrawal(wallet:string,owner:string,mint:string,value:string,maxFee=MAX_WITHDRAWAL_FEE){
   check(wallet!==owner,400,'Withdrawal recipient must be your original owner wallet.');
   const block=await rpc('getLatestBlockhash',[{commitment:'confirmed'}]);check(addressSchema.safeParse(block?.value?.blockhash).success&&Number.isSafeInteger(block.value.lastValidBlockHeight),502,'A fresh blockhash is unavailable.');
   const instructions:Instruction[]=[];let rawAmount:string;
@@ -44,12 +45,12 @@ export async function buildWithdrawal(wallet:string,owner:string,mint:string,val
     instructions.push({program,accounts:[source.pubkey,mint,destination,wallet],data});
   }
   const unsigned=wire(wallet,block.value.blockhash,instructions,mint),decoded=decodeSwapTransaction(unsigned,wallet);
-  const fee=await rpc('getFeeForMessage',[Buffer.from(decoded.messageBytes).toString('base64'),{commitment:'confirmed'}]);check(Number.isSafeInteger(fee?.value)&&fee.value>=0&&BigInt(fee.value)<=MAX_WITHDRAWAL_FEE,400,'Withdrawal network fee exceeds 0.01 SOL.');
+  const fee=await rpc('getFeeForMessage',[Buffer.from(decoded.messageBytes).toString('base64'),{commitment:'confirmed'}]);check(Number.isSafeInteger(fee?.value)&&fee.value>=0&&BigInt(fee.value)<=maxFee,400,'Withdrawal network fee exceeds the approved cap.');
   // Verify total rent plus network cost, rather than relying on the fee estimate alone.
   const balance=await rpc('getBalance',[wallet,{commitment:'confirmed'}]);check(Number.isSafeInteger(balance?.value)&&balance.value>=0,502,'Wallet balance is unavailable.');
   const simulation=await rpc('simulateTransaction',[unsigned,{encoding:'base64',commitment:'confirmed',sigVerify:false,replaceRecentBlockhash:false,accounts:{encoding:'base64',addresses:[wallet]}}]);
   check(simulation?.value?.err===null,400,'Withdrawal simulation failed. Check token funds and keep SOL for fees and account rent.');
-  const after=simulation.value.accounts?.[0];check(after&&Number.isSafeInteger(after.lamports)&&after.owner===SYSTEM_PROGRAM&&BigInt(balance.value)-BigInt(after.lamports)<=(mint===SOL_MINT?BigInt(rawAmount):0n)+MAX_WITHDRAWAL_FEE,400,'Withdrawal would exceed the approved fee and rent cap.');
+  const after=simulation.value.accounts?.[0];check(after&&Number.isSafeInteger(after.lamports)&&after.owner===SYSTEM_PROGRAM&&BigInt(balance.value)-BigInt(after.lamports)<=(mint===SOL_MINT?BigInt(rawAmount):0n)+maxFee,400,'Withdrawal would exceed the approved fee and rent cap.');
   return {unsigned,rawAmount,lastValidBlockHeight:String(block.value.lastValidBlockHeight)};
 }
 export const solanaWithdrawalRouter=Router();solanaWithdrawalRouter.use(auth);
@@ -68,7 +69,7 @@ solanaWithdrawalRouter.post('/withdrawal/challenge',async(req,res)=>{
   const input=z.object({mint:addressSchema,amount:z.string().regex(/^\d{1,12}(?:\.\d{1,18})?$/)}).strict().parse(req.body);check(Number(input.amount)>0,400,'Enter a positive withdrawal amount.');
   const proof=await transaction(async tx=>{
     const userId=await permissionSession(tx,req,true),wallet=await tx.solanaTradingWallet.findUnique({where:{userId}});check(wallet,404,'Trading wallet not found.');
-    await revokeTrading(tx,userId,'Trading permission revoked to withdraw funds.');await noPendingChatTrade(tx,userId);
+    await revokeTrading(tx,userId,'Trading permission revoked to withdraw funds.');await revokeWithdrawals(tx,userId,'Website withdrawal revoked WhatsApp withdrawal access.');await noPendingChatTrade(tx,userId);
     const message=`${new URL(env.appUrl).host} · Wagent Ai withdrawal authorization\nAccount: ${userId}\nNetwork: solana:mainnet\nFrom dedicated wallet: ${wallet.address}\nTo original owner wallet: ${wallet.ownerAddress}\nAsset: ${input.mint===SOL_MINT?'Native SOL':input.mint}\nAmount: ${input.amount}\nMaximum network fee and account rent: 0.01 SOL\n\nI authorize this one transfer to my original owner wallet. This revokes chat trading. It does not grant ongoing spending permission.\nNonce: ${token()}`;
     return tx.solanaPermissionChallenge.upsert({where:{userId_purpose:{userId,purpose:'WITHDRAWAL'}},create:{userId,purpose:'WITHDRAWAL',sessionId:hash(req.cookies.ab_session),address:wallet.ownerAddress,message,payload:input,expiresAt:new Date(Date.now()+300000)},update:{sessionId:hash(req.cookies.ab_session),address:wallet.ownerAddress,message,payload:input,expiresAt:new Date(Date.now()+300000)}});
   });res.json({id:proof.id,address:proof.address,message:proof.message});

@@ -16,6 +16,8 @@ A Solana-only agent workspace. Create a private token configuration, pair your p
 - Optional WhatsApp-only trading from a separately funded, server-managed wallet: signed advance permission, approved mints, per-trade/daily SOL budgets, fee and slippage caps, expiry, and revoke access. Owner-signed SOL/token withdrawals return funds to the original owner wallet. See [WhatsApp trading](docs/WHATSAPP-TRADING.md).
 - Guided setup after WhatsApp pairing: connect Binance Wallet or Phantom, create a trading wallet, review and approve a one-time SOL deposit, then sign trading limits. External-wallet/exchange deposits remain available by copying the Solana address. No new API key is required.
 - DEX Screener token discovery, price, and liquidity alerts, delivered in app or to the explicitly selected paired WhatsApp chat.
+- WhatsApp information commands: `Balance`, `Portfolio`, `Token <address>`, `Trade history`, and `My limits`, with on-chain balances and dated DEX Screener estimates. See [commands and withdrawal setup](docs/WHATSAPP-COMMANDS.md).
+- Optional WhatsApp SOL withdrawals to the fixed original owner wallet. Users separately sign withdrawal budgets and expiry on the website once, request an amount in chat, and confirm its unique code within two minutes. `Revoke withdrawals`, `Revoke access`, and `Stop all` block new submissions. Uncertain transfers are checked without automatic resubmission.
 
 ## Coming soon
 
@@ -40,7 +42,7 @@ Open http://localhost:5173. The API uses port 4000. The launcher starts the API,
 
 Core environment: DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY, APP_URL, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test. Only DATABASE_URL is used, with verified TLS and the included public Supabase CA. Add JUPITER_API_KEY and SOLANA_SWAPS_ENABLED=true for swaps. DEX Screener needs no key. Birdeye, Coinbase, and AI keys are not used. Each user supplies their personal WhatsApp agent key in Connections. See [provider setup and exact Vercel variables](docs/SOLANA-PROVIDERS.md).
 
-See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All 40 application tables retain backend-only access. The latest additive migration stores dedicated encrypted wallet keys, signed permissions, one-use challenges, chat-trade reservations, and withdrawals. Existing pairings and data remain intact. Watchlists use a per-user Setting key.
+See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All application tables retain backend-only access. Additive migrations store dedicated encrypted wallet keys, separate signed trading/withdrawal permissions, one-use challenges, confirmation codes, budget reservations, and withdrawals. Existing pairings and data remain intact. Watchlists use a per-user Setting key.
 
 ## Data-source behavior
 

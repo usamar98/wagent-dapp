@@ -29,7 +29,7 @@ function unsigned(side:string,amount:string,out:string,badInput=false,mint=MINT,
   const accounts=Buffer.from([0,1,2,3,4,6,6,2,5,5]),message=Buffer.concat([Buffer.from([1,0,2,addresses.length]),...addresses.map(a=>Buffer.from(bs58.decode(a))),Buffer.alloc(32),Buffer.from([1,5,accounts.length]),accounts,Buffer.from([data.length]),data]);
   return Buffer.concat([Buffer.from([1]),Buffer.alloc(64),message]).toString('base64');
 }
-function provider(options:{timeout?:boolean;badInput?:boolean;overdraw?:boolean;delegate?:boolean;onOrder?:()=>Promise<void>;onSubmit?:()=>Promise<void>;unknown?:boolean;badMinimum?:boolean;badRouteMinimum?:boolean;feeBps?:number;router?:string;portfolio?:boolean;priceFailure?:boolean;missingPrice?:boolean;largeBalance?:boolean}={}){
+function provider(options:{timeout?:boolean;badInput?:boolean;overdraw?:boolean;delegate?:boolean;onOrder?:()=>Promise<void>;onSubmit?:()=>Promise<void>;unknown?:boolean;badMinimum?:boolean;badRouteMinimum?:boolean;feeBps?:number;router?:string;portfolio?:boolean;priceFailure?:boolean;missingPrice?:boolean;largeBalance?:boolean;withdrawTimeout?:boolean;onWithdrawalBuild?:()=>Promise<void>}={}){
   let submissions=0,withdrawals=0,side='BUY',input='10000000',output='1000000',lastWire='',mint=MINT;const sent:string[]=[];
   const mock=vi.fn(async(url:any,init?:any):Promise<Response>=>{
     if(String(url).includes('api.dexscreener.com')){
@@ -52,12 +52,13 @@ function provider(options:{timeout?:boolean;badInput?:boolean;overdraw?:boolean;
     }
     if(method==='getSignatureStatuses')return Response.json({result:{value:[options.unknown?null:{err:null,confirmationStatus:'confirmed'}]}});
     if(method==='getBlockHeight')return Response.json({result:1000});
+    if(method==='getLatestBlockhash'&&options.onWithdrawalBuild)await options.onWithdrawalBuild();
     if(method==='getLatestBlockhash')return Response.json({result:{value:{blockhash:bs58.encode(randomBytes(32)),lastValidBlockHeight:100}}});
     if(method==='getTokenAccountsByOwner'){
       if(options.portfolio&&payload.params[1].programId){const program=payload.params[1].programId,rows=program===TOKEN?[[MINT,options.largeBalance?'9007199254740993':'3000000'],[MINT,options.largeBalance?'2':'2000000']]:[[OTHER,'2000000']];return Response.json({result:{value:rows.map(([id,amount],i)=>({pubkey:program===TOKEN?(i?destination:source):OTHER,account:{owner:program,data:{parsed:{info:{owner:payload.params[0],mint:id,tokenAmount:{amount,decimals:6}}}}}}))}});}
       return Response.json({result:{value:payload.params[1].mint?[{pubkey:source,account:{owner:TOKEN,data:{parsed:{info:{owner:tradingAddress,mint,tokenAmount:{amount:'100000000',decimals:6}}}}}}]:[]}});
     }
-    if(method==='sendTransaction'){withdrawals++;sent.push(payload.params[0]);const tx=getTransactionDecoder().decode(Buffer.from(payload.params[0],'base64'));return Response.json({result:bs58.encode(tx.signatures[tradingAddress as keyof typeof tx.signatures]!)});}
+    if(method==='sendTransaction'){withdrawals++;if(options.withdrawTimeout)throw Error('Uncertain withdrawal response');sent.push(payload.params[0]);const tx=getTransactionDecoder().decode(Buffer.from(payload.params[0],'base64'));return Response.json({result:bs58.encode(tx.signatures[tradingAddress as keyof typeof tx.signatures]!)});}
     throw new Error(`Unexpected outbound request ${String(url)} ${method}`);
   });vi.stubGlobal('fetch',mock);return {mock,submissions:()=>submissions,withdrawals:()=>withdrawals,sent};
 }
@@ -70,9 +71,92 @@ beforeAll(async()=>{
   const {encrypt}=await import('../server/security.js');channel=await db.personalAgentChannel.create({data:{userId,label:'Fixture chat',encryptedToken:encrypt('private-whatsapp-fixture-key'),tokenFingerprint:'fixture-key-fingerprint',ownerId:'user:owner',consentAt:new Date(),createdAt:new Date(Date.now()-1000),leaseToken:'test-lease',leaseUntil:new Date(Date.now()+3600000)}});
   const created=await post('/wallet',{consent:true});expect(created.status).toBe(201);tradingAddress=created.body.address;
 });
-beforeEach(async()=>{vi.unstubAllGlobals();headers['X-Vercel-Forwarded-For']=`198.51.100.${++testIp}`;environment.appUrl='http://localhost:5173';process.env.JUPITER_API_KEY='jupiter-test';process.env.SOLANA_SWAPS_ENABLED='true';delete process.env.SOLANA_CHAT_TRADING_ENABLED;await db.solanaChatTrade.deleteMany({where:{userId}});await db.solanaWalletWithdrawal.deleteMany({where:{userId}});await db.agentCommand.deleteMany({where:{userId}});await db.solanaPermissionChallenge.deleteMany({where:{userId}});await db.solanaTradePermission.deleteMany({where:{userId}});await db.user.update({where:{id:userId},data:{emergencyStop:false}});await db.personalAgentChannel.update({where:{id:channel.id},data:{appUrl:null,tokenFingerprint:'fixture-key-fingerprint',ownerId:'user:owner',enabled:true,leaseToken:'test-lease',leaseUntil:new Date(Date.now()+3600000)}});channelRuntime.clearWebsiteRuntimeCache();});
+beforeEach(async()=>{vi.unstubAllGlobals();headers['X-Vercel-Forwarded-For']=`198.51.100.${++testIp}`;environment.appUrl='http://localhost:5173';process.env.JUPITER_API_KEY='jupiter-test';process.env.SOLANA_SWAPS_ENABLED='true';delete process.env.SOLANA_CHAT_TRADING_ENABLED;delete process.env.SOLANA_CHAT_WITHDRAWALS_ENABLED;await db.solanaChatWithdrawal.deleteMany({where:{userId}});await db.solanaWithdrawalPermission.deleteMany({where:{userId}});await db.solanaChatTrade.deleteMany({where:{userId}});await db.solanaWalletWithdrawal.deleteMany({where:{userId}});await db.agentCommand.deleteMany({where:{userId}});await db.solanaPermissionChallenge.deleteMany({where:{userId}});await db.solanaTradePermission.deleteMany({where:{userId}});await db.user.update({where:{id:userId},data:{emergencyStop:false}});await db.personalAgentChannel.update({where:{id:channel.id},data:{appUrl:null,tokenFingerprint:'fixture-key-fingerprint',ownerId:'user:owner',enabled:true,leaseToken:'test-lease',leaseUntil:new Date(Date.now()+3600000)}});channelRuntime.clearWebsiteRuntimeCache();});
 beforeEach(async()=>{await db.solanaSwap.deleteMany({where:{userId}});const {clearTokenCache}=await import('../server/solana.js');clearTokenCache();});
 afterEach(()=>vi.unstubAllGlobals());afterAll(async()=>{await db?.close();await socket?.stop();await pg?.close();});
+
+describe('WhatsApp information commands',()=>{
+  it('returns live SOL balance and token holdings directly without submitting a trade',async()=>{
+    const p=provider({portfolio:true});const b=await chat('Balance');expect(b.command.reply).toContain('Native SOL: 1 SOL');expect(b.command.reply).toContain(tradingAddress);expect(b.command.reply).toContain('$100.00');
+    const portfolio=await chat('Portfolio');expect(portfolio.command.reply).toContain('JUP: 5');expect(portfolio.command.reply).toContain('USDC: 2');expect(portfolio.command.reply).toContain('Estimated total value');expect(p.submissions()).toBe(0);expect(p.withdrawals()).toBe(0);
+  });
+  it('returns token metrics for an exact address and labels missing metadata',async()=>{
+    const p=provider({portfolio:true});const result=await chat(`Token details ${MINT}`);expect(result.command.reply).toContain('TOKEN DETAILS · JUP');expect(result.command.reply).toContain(MINT);expect(result.command.reply).toContain('Market cap: Unavailable');expect(result.command.reply).toContain('Pool liquidity: $100,000.00');
+    const before=p.mock.mock.calls.length;expect((await chat('Token https://example.com')).command.status).toBe('REJECTED');expect(p.mock.mock.calls.length).toBe(before);
+  });
+  it('keeps missing prices explicit and does not substitute paper or sample balances',async()=>{
+    provider({portfolio:true,priceFailure:true});const result=await chat('Show my portfolio');expect(result.command.reply).toContain('no available price');expect(result.command.reply).toContain('Unavailable');expect(result.command.reply).not.toContain('PAPER');
+  });
+  it('returns only this user’s stored trade history with ticker and transaction link',async()=>{
+    await grant();const p=provider();await chat(`Buy 0.01 SOL of ${MINT}`);const result=await chat('Trade history');expect(result.command.reply).toContain('BUY · TEST');expect(result.command.reply).toContain('CONFIRMED');expect(result.command.reply).toContain('https://solscan.io/tx/');expect(p.submissions()).toBe(1);
+    const alternateId=(await other.get('/api/bootstrap')).body.user.id;const empty=await (await import('../server/whatsapp-information.js')).informationReply(alternateId,{kind:'HISTORY'});expect(empty).not.toContain(tradingAddress);
+  });
+  it('reports remaining daily trading budget and keeps withdrawal access separate',async()=>{
+    await grant();provider();await chat(`Buy 0.01 SOL of ${MINT}`);const result=await chat('My limits');expect(result.command.reply).toContain('Trading: active');expect(result.command.reply).toContain('Remaining today: 0.189 SOL');expect(result.command.reply).toContain('Withdrawals: inactive');
+  });
+  it('does not process information from a changed WhatsApp owner',async()=>{
+    const p=provider();await expect(execute(userId,'Balance','WHATSAPP',randomUUID(),new Date(),{id:channel.id,ownerId:'different-owner',leaseToken:'test-lease'})).rejects.toThrow();expect(p.mock).not.toHaveBeenCalled();
+  });
+});
+
+describe('separate permission for confirmed WhatsApp SOL withdrawals',()=>{
+  const settings={perWithdrawalSol:'0.01',dailySol:'0.05',maxFeeSol:'0.00001',durationHours:24,consent:true};
+  const route='/api/solana/chat-trading/withdrawal-permission';
+  const access=(suffix:string,body:unknown={})=>client.post(route+suffix).set(headers).send(body);
+  async function permit(change:Record<string,unknown>={}){const proof=await access('/challenge',{...settings,...change});expect(proof.status,JSON.stringify(proof.body)).toBe(200);const signature=sign(null,Buffer.from(proof.body.message),keys.privateKey).toString('base64');const result=await access('/authorize',{id:proof.body.id,signature});expect(result.status,JSON.stringify(result.body)).toBe(200);return proof.body;}
+  const code=(reply:string)=>reply.match(/CONFIRM WITHDRAW ([A-F0-9]{12})/)?.[1]||'MISSING';
+  it('requires a separate original-owner signature; old trading permission grants no withdrawal access',async()=>{
+    await grant();const p=provider();expect((await chat('Withdraw 0.001 SOL')).command.reply).toContain('separate WhatsApp withdrawal access');expect(await db.solanaWithdrawalPermission.count({where:{userId}})).toBe(0);expect(p.withdrawals()).toBe(0);
+    expect((await request(app).get(route)).status).toBe(401);const proof=await access('/challenge',settings);expect(proof.body.message).toContain('Fixed original owner recipient: '+ownerAddress);
+    expect((await access('/authorize',{id:proof.body.id,signature:Buffer.alloc(64).toString('base64')})).status).toBe(400);
+    expect((await other.post(route+'/authorize').set(headers).send({id:proof.body.id,signature:sign(null,Buffer.from(proof.body.message),keys.privateKey).toString('base64')})).status).toBe(400);
+  });
+  it('shows a preview, then signs only one native SOL transfer to the original owner',async()=>{
+    await permit();const p=provider(),preview=await chat('Withdraw 0.001 SOL');expect(code(preview.command.reply)).not.toBe('MISSING');expect(preview.command.reply).toContain(ownerAddress);expect(p.withdrawals()).toBe(0);
+    const confirmation='CONFIRM WITHDRAW '+code(preview.command.reply),id=randomUUID(),result=await chat(confirmation,id);expect(result.command.reply).toContain('WITHDRAWAL CONFIRMED');expect(p.withdrawals()).toBe(1);
+    await chat(confirmation,id);await chat(confirmation);expect(p.withdrawals()).toBe(1);
+    const tx=getTransactionDecoder().decode(Buffer.from(p.sent[0],'base64')),message=getCompiledTransactionMessageDecoder().decode(tx.messageBytes);if(message.version!=='legacy')throw Error('Expected a native SOL legacy transfer');const ix=message.instructions[0];expect(message.staticAccounts[ix.programAddressIndex]).toBe(SYSTEM);expect(message.staticAccounts[ix.accountIndices![1]]).toBe(ownerAddress);expect(Buffer.from(ix.data!).readBigUInt64LE(4)).toBe(1000000n);
+    const view=await client.get(route);expect(JSON.stringify(view.body)).not.toMatch(/confirmationHash|consentMessage|encryptedSecret|sessionId/);expect(view.body.history[0].status).toBe('CONFIRMED');
+  });
+  it('claims concurrent confirmations at most once',async()=>{
+    await permit();const p=provider(),preview=await chat('Withdraw 0.001 SOL'),confirm='CONFIRM WITHDRAW '+code(preview.command.reply);await Promise.all([chat(confirm),chat(confirm)]);expect(p.withdrawals()).toBe(1);expect(await db.solanaChatWithdrawal.count({where:{userId,status:'CONFIRMED'}})).toBe(1);
+  });
+  it('rejects custom recipients, other assets, zero amounts and excessive budgets',async()=>{
+    await permit();const p=provider();for(const text of [`Withdraw 0.001 SOL to ${source}`,'Withdraw 2 USDC','Withdraw 0 SOL','Withdraw 0.02 SOL'])expect((await chat(text)).command.status).toBe('REJECTED');expect(p.withdrawals()).toBe(0);
+    expect((await access('/challenge',{...settings,recipient:source})).status).toBe(400);expect((await access('/challenge',{...settings,maxFeeSol:'0.002'})).status).toBe(400);
+  });
+  it('rejects wrong and expired confirmation codes without signing or sending',async()=>{
+    await permit();const p=provider(),preview=await chat('Withdraw 0.001 SOL');expect((await chat('CONFIRM WITHDRAW AAAAAAAAAAAA')).command.status).toBe('REJECTED');await db.solanaChatWithdrawal.updateMany({where:{userId},data:{confirmationExpiresAt:new Date(Date.now()-1000)}});expect((await chat('CONFIRM WITHDRAW '+code(preview.command.reply))).command.reply).toContain('expired');expect(p.withdrawals()).toBe(0);expect((await db.solanaChatWithdrawal.findFirst({where:{userId}})).signature).toBeNull();
+  });
+  it('cancels a preview and invalidates its code when replaced by another request',async()=>{
+    await permit();const p=provider(),a=await chat('Withdraw 0.001 SOL'),b=await chat('Withdraw 0.002 SOL');expect((await chat('CONFIRM WITHDRAW '+code(a.command.reply))).command.status).toBe('REJECTED');expect((await chat('Cancel withdrawal')).command.reply).toContain('WITHDRAWAL CANCELLED');expect((await chat('CONFIRM WITHDRAW '+code(b.command.reply))).command.status).toBe('REJECTED');expect(p.withdrawals()).toBe(0);
+  });
+  it('keeps daily usage across newly signed permissions and includes fee reserves',async()=>{
+    await permit({perWithdrawalSol:'0.00101',dailySol:'0.00101'});const p=provider(),preview=await chat('Withdraw 0.001 SOL');await chat('CONFIRM WITHDRAW '+code(preview.command.reply));await permit({perWithdrawalSol:'0.00101',dailySol:'0.00101'});expect((await chat('Withdraw 0.001 SOL')).command.reply).toContain('budget');expect(p.withdrawals()).toBe(1);expect((await chat('My limits')).command.reply).toContain('Remaining today: 0 SOL');
+  });
+  it('revokes pending requests from chat and from the website',async()=>{
+    await permit();const p=provider(),a=await chat('Withdraw 0.001 SOL');await chat('Revoke withdrawals');expect((await chat('CONFIRM WITHDRAW '+code(a.command.reply))).command.status).toBe('REJECTED');await permit();const b=await chat('Withdraw 0.001 SOL');expect((await access('/revoke')).status).toBe(200);expect((await chat('CONFIRM WITHDRAW '+code(b.command.reply))).command.status).toBe('REJECTED');expect(p.withdrawals()).toBe(0);
+  });
+  it('Stop all and Revoke access block withdrawals while trading-only revoke stays separate',async()=>{
+    await permit();const p=provider();await chat('Revoke trading');expect((await client.get(route)).body.permission.active).toBe(true);await chat('Revoke access');expect((await client.get(route)).body.permission.active).toBe(false);await permit();await chat('Stop all');expect((await client.get(route)).body.permission.active).toBe(false);expect((await chat('Withdraw 0.001 SOL')).command.status).toBe('REJECTED');expect(p.withdrawals()).toBe(0);
+  });
+  it('blocks expired permissions and the server withdrawal kill switch',async()=>{
+    await permit();const p=provider();await db.solanaWithdrawalPermission.updateMany({where:{userId},data:{expiresAt:new Date(Date.now()-1000)}});expect((await chat('Withdraw 0.001 SOL')).command.status).toBe('REJECTED');await permit();process.env.SOLANA_CHAT_WITHDRAWALS_ENABLED='false';expect((await chat('Withdraw 0.001 SOL')).command.status).toBe('REJECTED');expect(p.withdrawals()).toBe(0);
+  });
+  it('invalidates access when the WhatsApp key or verified owner changes',async()=>{
+    await permit();const p=provider();await db.personalAgentChannel.update({where:{id:channel.id},data:{tokenFingerprint:'changed'}});expect((await chat('Withdraw 0.001 SOL')).command.status).toBe('REJECTED');await db.personalAgentChannel.update({where:{id:channel.id},data:{tokenFingerprint:'fixture-key-fingerprint'}});await db.solanaWallet.update({where:{userId},data:{address:source}});expect((await chat('Withdraw 0.001 SOL')).command.status).toBe('REJECTED');await db.solanaWallet.update({where:{userId},data:{address:ownerAddress}});expect(p.withdrawals()).toBe(0);
+  });
+  it('honors revocation while constructing a withdrawal before signing',async()=>{
+    await permit();const p=provider({onWithdrawalBuild:async()=>{expect((await access('/revoke')).status).toBe(200);}}),preview=await chat('Withdraw 0.001 SOL');await chat('CONFIRM WITHDRAW '+code(preview.command.reply));expect(p.withdrawals()).toBe(0);expect((await db.solanaChatWithdrawal.findFirst({where:{userId}})).signature).toBeNull();
+  });
+  it('never resends an uncertain transfer and blocks competing chat trades and withdrawals',async()=>{
+    await permit();await grant();const p=provider({withdrawTimeout:true,unknown:true}),preview=await chat('Withdraw 0.001 SOL'),confirmation='CONFIRM WITHDRAW '+code(preview.command.reply);expect((await chat(confirmation)).command.reply).toContain('PENDING');await chat(confirmation);expect((await chat('Withdraw 0.001 SOL')).command.reply).toContain('needs confirmation');expect((await chat(`Buy 0.001 SOL of ${MINT}`)).command.reply).toContain('needs confirmation');expect((await post('/withdrawal/challenge',{mint:SOL,amount:'0.001'})).status).toBe(409);expect((await chat('Check withdrawal')).command.reply).toContain('PENDING');expect(p.withdrawals()).toBe(1);
+    provider();expect((await chat('Check withdrawal')).command.reply).toContain('WITHDRAWAL CONFIRMED');expect((await db.solanaChatWithdrawal.findFirst({where:{userId}})).status).toBe('CONFIRMED');
+  });
+  it('requires a fresh review after the connected website changes',async()=>{
+    const proof=await access('/challenge',settings);expect(proof.status).toBe(200);environment.appUrl='https://different.example';expect((await access('/authorize',{id:proof.body.id,signature:sign(null,Buffer.from(proof.body.message),keys.privateKey).toString('base64')})).status).toBe(409);
+  });
+});
 
 describe('private portfolio and one-time owner-approved sales',()=>{
   const sell=(body:unknown)=>client.post('/api/solana/portfolio/sell/quote').set(headers).send(body);

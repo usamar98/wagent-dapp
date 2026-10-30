@@ -1,3 +1,4 @@
+import {revokeWithdrawals} from './withdrawal-access.js';
 import { Router, type Request } from 'express';
 import { createPublicKey, verify } from 'node:crypto';
 import bs58 from 'bs58';
@@ -46,7 +47,8 @@ async function liveUser(tx:Tx,req:Request){
   check(user&&!user.disabled&&session?.userId===userId&&session.expiresAt>new Date(),401,'Your account session expired. Sign in again.');
   check(!user.emergencyStop,409,'Emergency stop is active. Clear it before preparing or submitting a swap.');return user;
 }
-async function noUnresolved(tx:Tx,userId:string){check(!await tx.solanaSwap.findFirst({where:{userId,status:{in:unresolved}}}),409,'A previous swap still needs confirmation. Check its status before creating another order.');}
+async function noUnresolved(tx:Tx,userId:string){
+  check(!await tx.solanaChatWithdrawal.findFirst({where:{userId,status:{in:['PREPARING','PREPARED','EXECUTING','UNKNOWN']}}}),409,'A WhatsApp withdrawal needs confirmation. Send Check withdrawal.');check(!await tx.solanaSwap.findFirst({where:{userId,status:{in:unresolved}}}),409,'A previous swap still needs confirmation. Check its status before creating another order.');}
 export const solanaSwapsRouter=Router();
 solanaSwapsRouter.get('/capabilities',async(_req,res)=>{await registerProductionWebsite();res.json({...providerStatus(),chatTradingEnabled:chatTradingEnabled()});});
 solanaSwapsRouter.use(auth);
@@ -70,12 +72,12 @@ solanaSwapsRouter.post('/wallet/verify',async(req,res)=>{
     await tx.solanaWalletChallenge.delete({where:{id:proof.id}});
     await tx.solanaSwap.updateMany({where:{userId:req.user!.id,status:'QUOTED'},data:{status:'CANCELLED'}});
     const owner=await tx.solanaWallet.findUnique({where:{address:proof.address}});check(!owner||owner.userId===req.user!.id,409,'This Solana wallet is already linked to another account.');
-    const previous=await tx.solanaWallet.findUnique({where:{userId:req.user!.id}});if(previous?.address!==proof.address)await revokeTrading(tx,req.user!.id,'Changing the linked Solana wallet revoked chat trading permission.');
+    const previous=await tx.solanaWallet.findUnique({where:{userId:req.user!.id}});if(previous?.address!==proof.address){await revokeTrading(tx,req.user!.id,'Changing the linked Solana wallet revoked chat trading permission.');await revokeWithdrawals(tx,req.user!.id,'Changing the linked Solana wallet revoked withdrawal access.');}
     return tx.solanaWallet.upsert({where:{userId:req.user!.id},create:{userId:req.user!.id,address:proof.address},update:{address:proof.address,verifiedAt:new Date()}});
   });res.json(wallet);
 });
 solanaSwapsRouter.post('/wallet/disconnect',async(req,res)=>{
-  await transaction(async tx=>{await lockUser(tx,req.user!.id);await noUnresolved(tx,req.user!.id);await revokeTrading(tx,req.user!.id,'Unlinking the Solana wallet revoked chat trading permission.');await tx.solanaWallet.deleteMany({where:{userId:req.user!.id}});await tx.solanaWalletChallenge.deleteMany({where:{userId:req.user!.id}});await tx.solanaSwap.updateMany({where:{userId:req.user!.id,status:'QUOTED'},data:{status:'CANCELLED'}});});res.json({ok:true});
+  await transaction(async tx=>{await lockUser(tx,req.user!.id);await noUnresolved(tx,req.user!.id);await revokeTrading(tx,req.user!.id,'Unlinking the Solana wallet revoked chat trading permission.');await revokeWithdrawals(tx,req.user!.id,'Unlinking the Solana wallet revoked chat trading permission.');await tx.solanaWallet.deleteMany({where:{userId:req.user!.id}});await tx.solanaWalletChallenge.deleteMany({where:{userId:req.user!.id}});await tx.solanaSwap.updateMany({where:{userId:req.user!.id,status:'QUOTED'},data:{status:'CANCELLED'}});});res.json({ok:true});
 });
 solanaSwapsRouter.get('/swaps',async(req,res)=>{
   await db.solanaSwap.updateMany({where:{userId:req.user!.id,status:'QUOTED',expiresAt:{lte:new Date()}},data:{status:'EXPIRED'}});
