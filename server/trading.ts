@@ -18,6 +18,8 @@ import {informationCommand} from './whatsapp-information.js';
 import {isWithdrawalCommand,queueWithdrawalCommand} from './solana-chat-withdrawals.js';
 import {revokeWithdrawals} from './withdrawal-access.js';
 import {tradeCheckCommand,whatsappReviewReason} from './chat-trade-status.js';
+import {robinhoodRelease,readiness as rhReadiness} from './robinhood/providers.js';
+import {executeRhCommand} from './robinhood/commands.js';
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const help = 'WAGENT AI · SOLANA · Information: Balance; Portfolio; Token <token address>; Trade history; My limits. Trading: Buy 0.001 SOL of <token address>; Sell 100 of <token address>; Check trade. Withdrawals: Withdraw 0.01 SOL; CONFIRM WITHDRAW <code>; Cancel withdrawal; Check withdrawal. Withdrawals need separate owner-signed permission, a fixed original recipient, limits and expiry. Controls: Revoke trading; Revoke withdrawals; Revoke access; Stop all. Configure permissions and alerts on the website.';
@@ -38,8 +40,8 @@ export async function getWorkspace(userId: string) {
   return {
     workspace, versions: versions.filter(v => configSchema.safeParse(v.config).success), instances, commands: commands.reverse(), intents,
     channel: channel ? { label:channel.label, paired:!!channel.ownerId, enabled:channel.enabled, pairingExpiresAt:channel.pairingExpiresAt, lastPollAt:channel.lastPollAt, lastMessageAt:channel.lastMessageAt, lastError:channel.lastError } : null,
-    network: 'solana', dataProvider: 'DEX Screener', workerOnline: !!worker && Date.now() - Number(worker.value) < 30000,
-    liveTrading: providerStatus().swapsEnabled,
+    network: robinhoodRelease()?'robinhood':'solana', dataProvider: 'DEX Screener', workerOnline: !!worker && Date.now() - Number(worker.value) < 30000,
+    liveTrading: robinhoodRelease()?rhReadiness().swaps:providerStatus().swapsEnabled,
   };
   });
 }
@@ -54,6 +56,7 @@ async function activeRuntime(tx: Tx, userId: string) {
 }
 
 export async function executeCommand(userId: string, text: string, source: 'WEB' | 'WHATSAPP', externalId: string, now = new Date(), channelContext?: { id: string; leaseToken: string; ownerId: string }) {
+  if(robinhoodRelease())return executeRhCommand(userId,text,source,externalId,now,channelContext);
   let website:WebsiteRuntime={appUrl:websiteOrigin(env.appUrl),swapsEnabled:providerStatus().swapsEnabled};
   if(source==='WHATSAPP'){
     check(channelContext,403,'A verified personal agent connection is required.');

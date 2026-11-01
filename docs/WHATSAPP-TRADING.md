@@ -1,3 +1,5 @@
+> Legacy Solana reference. New production trading uses Robinhood Chain. See [Robinhood setup and safety](ROBINHOOD.md). Existing Solana funds retain original-owner recovery; these instructions do not enable new Solana execution.
+
 # WhatsApp trading
 
 ## User setup

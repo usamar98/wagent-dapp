@@ -28,6 +28,9 @@ import { portfolioSellsRouter } from './portfolio-sells.js';
 import { solanaFundingRouter } from './solana-funding.js';
 import { cloudWorkerRouter } from './cloud-worker.js';
 import {withdrawalPermissionsRouter} from './solana-withdrawal-permissions.js';
+import {rhRouter} from './robinhood/router.js';
+import {rhDispatchRouter} from './robinhood/commands.js';
+import {robinhoodRelease,readiness as rhReadiness} from './robinhood/providers.js';
 
 export const app=express();
 app.disable('x-powered-by');
@@ -57,7 +60,7 @@ app.use('/api',csrf);
 app.use('/api',async(_req,_res,next)=>{await registerProductionWebsite();next();});
 // Preserve historical records while keeping the public release limited to setup and research.
 app.use(['/api/marketplace','/api/checkout','/api/creator/connect','/api/versions/:id/submit'],(_req,_res,next)=>{
-  if (!env.demo) return next(new AppError(409,'The agent marketplace and purchases are coming soon. Create a private Solana agent instead.'));
+  if (!env.demo) return next(new AppError(409,'The agent marketplace and purchases are coming soon. Create a private token agent instead.'));
   next();
 });
 app.use('/api/instances/:id/control',(req,_res,next)=>{
@@ -65,10 +68,17 @@ app.use('/api/instances/:id/control',(req,_res,next)=>{
   next();
 });
 const authLimit=rateLimit({windowMs:15*60000,limit:env.demo?100:15,message:{error:'Too many authentication attempts. Try again later.'}});
-app.get('/api/health',async(_req,res)=>{await db.sql`SELECT 1`;res.json({ok:true,demo:env.demo,network:'solana',execution:env.demo?'paper_only':providerStatus().swapsEnabled?'wallet_approved':'setup_required'});});
+app.get('/api/health',async(_req,res)=>{await db.sql`SELECT 1`;res.json({ok:true,demo:env.demo,network:robinhoodRelease()?'robinhood':'solana',execution:env.demo?'paper_only':(robinhoodRelease()?rhReadiness().swaps:providerStatus().swapsEnabled)?'wallet_approved':'setup_required'});});
 app.get('/api/bootstrap',async(req,res)=>{res.json({user:req.user||null,demo:env.demo,costs,licenseTerms,commissionBps:Number((await db.setting.findUnique({where:{key:'commissionBps'}}))?.value||1000),whatsapp:{enabled:true,platform:'personal_agent',execution:env.demo?'paper_only':'website_wallet_approval',termsUrl:'https://www.whatsapp.com/legal/third-party-agents-terms'},stripeEnabled:env.paymentsEligible&&env.stripeKey.startsWith('sk_test_')});});
 app.use('/api/trading', tradingRouter);
 app.use('/api/whatsapp-agent', personalWhatsAppRouter);
+app.use('/api/robinhood',rhDispatchRouter);
+app.use('/api/robinhood',rhRouter);
+// Existing funded Solana wallets retain read access, owner proofs and recovery withdrawals.
+app.use('/api/solana',(req,_res,next)=>{
+  if(!robinhoodRelease()||req.method==='GET'||/^\/(wallet\/(challenge|verify)|chat-trading\/(withdrawal(?:\/challenge)?|withdrawals\/[^/]+\/reconcile|trades\/[^/]+\/reconcile|revoke)|portfolio\/.*reconcile)$/.test(req.path))return next();
+  next(new AppError(409,'New trading has moved to Robinhood Chain. Existing Solana funds remain available in Legacy Solana recovery.'));
+});
 app.use('/api/solana', chatExecutionRouter);
 app.use('/api/solana', solanaPermissionsRouter);
 app.use('/api/solana/chat-trading/withdrawal-permission', withdrawalPermissionsRouter);

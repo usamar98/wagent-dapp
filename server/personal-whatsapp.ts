@@ -8,6 +8,7 @@ import { executeCommand } from './trading.js';
 import { env } from './env.js';
 import { websiteOrigin } from './website-runtime.js';
 import { revokeTrading } from './solana-permissions.js';
+import {robinhoodRelease} from './robinhood/providers.js';
 
 const base = 'https://api.whatsapp.com/agent/v1';
 const senderId = z.string().regex(/^user:[A-Za-z0-9._-]{1,160}$/);
@@ -58,6 +59,10 @@ async function deliverPending(channel: { id: string; ownerId: string | null; enc
   const claimed = await db.agentCommand.updateMany({ where: { id: commandId, channelId: channel.id, recipientId: channel.ownerId, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'SENDING' } });
   if (!claimed.count) return;
   const command = await db.agentCommand.findUniqueOrThrow({ where: { id: commandId } });
+  if(command.source==='RH_ALERT'){
+    const user=await db.user.findUnique({where:{id:command.userId}}),active=await db.sql`SELECT r.id FROM "RHAlertEvent" e JOIN "RHAlert" r ON r.id=e."ruleId" WHERE e.id=${command.externalId} AND e."userId"=${command.userId} AND r.enabled=true AND r.delivery='WHATSAPP'`;
+    if(!user||user.disabled||user.emergencyStop||!active.length){await db.agentCommand.update({where:{id:command.id},data:{deliveryStatus:'CANCELLED'}});return;}
+  }
   if(command.source==='ALERT'){
     const user=await db.user.findUnique({where:{id:command.userId}});
     const event=command.externalId?await db.solanaAlertEvent.findUnique({where:{id:command.externalId}}):null;
@@ -106,7 +111,7 @@ export async function syncPersonalAgent(userId: string) {
           const pairing = message.text?.body.trim().match(/^link ([A-F0-9]{12})$/i);
           if (!pairing || !fresh.pairingHash || hash(pairing[1].toUpperCase()) !== fresh.pairingHash || !fresh.pairingExpiresAt || fresh.pairingExpiresAt < new Date()) continue;
           // Meta rejects sends to anyone other than this agent's creator.
-          await sendReply(decrypt(fresh.encryptedToken), message.from, 'WhatsApp connected successfully. Select your Solana agent in Connections. Send Help for trading commands. Optional WhatsApp-only trading requires a separately funded trading wallet and a signed spending permission on the website. Pairing alone does not authorize access to wallet funds.');
+          await sendReply(decrypt(fresh.encryptedToken), message.from, `WhatsApp connected successfully. Select your ${robinhoodRelease()?'Robinhood Chain':'Solana'} agent in Connections. Send Help for trading commands. Optional WhatsApp-only trading requires a separately funded trading wallet and a signed spending permission on the website. Pairing alone does not authorize access to wallet funds.`);
           await transaction(async tx => {
             await lockUser(tx, userId);
             await tx.personalAgentChannel.updateMany({ where: { id: fresh.id, leaseToken: lease, pairingHash: fresh.pairingHash, enabled: true }, data: { ownerId: message.from, agentId: entry.id, pairingHash: null, pairingExpiresAt: null, lastMessageAt: new Date() } });

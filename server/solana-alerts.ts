@@ -72,6 +72,7 @@ export async function checkAlert(rule:Rule){
   }catch(error){await db.solanaAlertRule.updateMany({where:{id:rule.id,userId:rule.userId},data:{lastCheckedAt:new Date(),lastError:error instanceof AppError?error.message:'Alert data could not be checked. No trade was placed.'}});}
 }
 export async function tickSolanaAlerts(userId?:string,options:{limit?:number;deadline?:number}={}){
+  if((await import('./robinhood/providers.js')).robinhoodRelease()){await (await import('./robinhood/data.js')).tickRhAlerts(options);return;}
   if(!providerStatus().alertsEnabled)return;
   // A persisted lease coordinates web checks and background workers without holding a DB transaction across HTTP.
   const lease=token(),key='solana:alert-worker';

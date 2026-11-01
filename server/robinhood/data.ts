@@ -1,0 +1,65 @@
+import { randomUUID } from 'node:crypto';
+import { db, transaction, lockUser, type Tx } from '../db.js';
+import { check } from '../security.js';
+import { type RhFeed, type RhToken, isEvmAddress, ETH_TOKEN } from '../../shared/robinhood.js';
+import { assetBalance, evmAddress, fetchBounded, fromWei, readiness, rpc, tokenInfo } from './providers.js';
+import { walletFor, type RhWallet } from './access.js';
+import { operationList } from './operations.js';
+const feeds=new Map<string,{at:number;feed:RhFeed}>(),inflight=new Map<string,Promise<RhFeed>>();
+export function normalizeRhPairs(raw:unknown,addresses?:string[]):RhToken[]{
+  check(Array.isArray(raw)&&raw.length<=3000,502,'Unsupported DEX Screener response.');const selected=new Map<string,RhToken>();
+  for(const p of raw){if(p?.chainId!=='robinhood'||!isEvmAddress(p.baseToken?.address||'')||typeof p.pairAddress!=='string'||!/^0x(?:[\da-fA-F]{40}|[\da-fA-F]{64})$/.test(p.pairAddress))continue;const address=evmAddress(p.baseToken.address);if(addresses&&!addresses.includes(address))continue;
+    const positive=(n:unknown)=>n!==null&&n!==undefined&&Number.isFinite(Number(n))&&Number(n)>=0?Number(n):null,clean=(v:unknown,n:number)=>String(v??'').replace(/[\r\n\x00-\x1f]/g,' ').slice(0,n);
+    const token:RhToken={address,name:clean(p.baseToken.name,160),symbol:clean(p.baseToken.symbol,40),priceUsd:positive(p.priceUsd)===0?null:positive(p.priceUsd),liquidityUsd:positive(p.liquidity?.usd),volume24h:positive(p.volume?.h24),change24h:Number.isFinite(p.priceChange?.h24)?p.priceChange.h24:null,pairCreatedAt:Number.isSafeInteger(p.pairCreatedAt)&&p.pairCreatedAt>0&&p.pairCreatedAt<=Date.now()?p.pairCreatedAt:null,pairAddress:p.pairAddress,screenerUrl:`https://dexscreener.com/robinhood/${p.pairAddress}`};
+    const prior=selected.get(address);if(!prior||(token.liquidityUsd??-1)>(prior.liquidityUsd??-1))selected.set(address,token);
+  }return [...selected.values()];
+}
+export async function rhFeed(query='',tokens?:string[]):Promise<RhFeed>{
+  const exact=tokens?.map(evmAddress),key=exact?'tokens:'+exact.sort().join(','):'query:'+query;const cached=feeds.get(key);if(cached&&Date.now()-cached.at<60000)return cached.feed;if(inflight.has(key))return inflight.get(key)!;
+  const task=(async()=>{try{let raw:any,requested=exact;const get=(path:string)=>fetchBounded('https://api.dexscreener.com'+path,{},'DEX Screener');
+    if(exact)raw=exact.length?await get('/tokens/v1/robinhood/'+exact.join(',')):[];
+    else if(isEvmAddress(query)){requested=[evmAddress(query)];raw=await get('/tokens/v1/robinhood/'+requested[0]);}
+    else if(query){const result=await get('/latest/dex/search?q='+encodeURIComponent(query));raw=result.pairs||[];}
+    else{const profiles=await get('/token-profiles/latest/v1');check(Array.isArray(profiles)&&profiles.length<=2000,502,'Discovery feed is unavailable.');requested=[...new Set<string>(profiles.filter(p=>p.chainId==='robinhood'&&isEvmAddress(p.tokenAddress||'')).map(p=>evmAddress(p.tokenAddress)))].slice(0,30);raw=requested.length?await get('/tokens/v1/robinhood/'+requested.join(',')):[];}
+    const feed:RhFeed={tokens:normalizeRhPairs(raw,requested).sort((a,b)=>(b.liquidityUsd||0)-(a.liquidityUsd||0)).slice(0,60),source:'DEX Screener',fetchedAt:new Date().toISOString(),stale:false,coverage:'Latest indexed Robinhood profiles and pools. First observation is not token launch time; coverage is not exhaustive.'};if(feeds.size>=80)feeds.delete(feeds.keys().next().value!);feeds.set(key,{at:Date.now(),feed});return feed;
+  }catch(e){if(cached&&Date.now()-cached.at<300000)return {...cached.feed,stale:true};throw e;}})().finally(()=>inflight.delete(key));inflight.set(key,task);return task;
+}
+const watchKey=(id:string)=>'robinhood:watchlist:'+id;
+export async function watchlist(userId:string,tx:Tx=db){const row=await tx.setting.findUnique({where:{key:watchKey(userId)}});let tokens:string[]=[];try{tokens=JSON.parse(row?.value||'[]').filter((v:unknown)=>typeof v==='string'&&isEvmAddress(v)).map(evmAddress);}catch{/* Old malformed settings are not trading authority. */}return [...new Set(tokens)].slice(0,30);}
+export async function setWatched(userId:string,address:string,watched:boolean){return transaction(async tx=>{await lockUser(tx,userId);const values=new Set(await watchlist(userId,tx));if(watched)values.add(evmAddress(address));else values.delete(evmAddress(address));check(values.size<=30,400,'Your watchlist can hold 30 tokens.');const value=JSON.stringify([...values]),key=watchKey(userId);await tx.setting.upsert({where:{key},create:{key,value},update:{value}});return [...values];});}
+export async function portfolio(userId:string,source:'TRADING'|'OWNER'='TRADING'){
+  const deadline=Date.now()+20000;
+  const wallet=await walletFor(userId);if(!wallet)return {source,wallet:null,native:null,tokens:[],history:[],totalUsd:null,partial:false,error:null,at:new Date().toISOString()};
+  const address=source==='TRADING'?wallet.address:wallet.ownerAddress,history=await operationList(userId);const native=fromWei(await assetBalance(address));
+  let partial=false;const discovered=new Set<string>([...(await watchlist(userId)),...history.map(h=>h.tokenAddress).filter(t=>t!==ETH_TOKEN)]);
+  try{const raw=await rpc('alchemy_getTokenBalances',[address,'erc20']);check(Array.isArray(raw?.tokenBalances)&&raw.tokenBalances.length<=1000,502,'Token index is unavailable.');for(const item of raw.tokenBalances)if(isEvmAddress(item.contractAddress||'')&&item.tokenBalance&&BigInt(item.tokenBalance)>0n)discovered.add(evmAddress(item.contractAddress));}catch{partial=true;}
+  const addresses=[...discovered].slice(0,60);if(discovered.size>60)partial=true;const tokens:any[]=[];
+  // Bounded sequential reads respect free RPC limits and isolate malformed tokens.
+  for(const token of addresses){if(Date.now()>deadline){partial=true;break;}try{const amount=await assetBalance(address,token);if(amount===0n)continue;const info=await tokenInfo(token);tokens.push({...info,amount:fromWei(amount,info.decimals),rawAmount:amount.toString(),priceUsd:null,valueUsd:null});}catch{partial=true;}}
+  const prices=new Map<string,RhToken>();let pricesAt:string|null=null,pricesStale=false,priceError:string|null=null;
+  for(let i=0;i<tokens.length;i+=30){try{const feed=await rhFeed('',tokens.slice(i,i+30).map(t=>t.address));feed.tokens.forEach(t=>prices.set(t.address,t));pricesAt=feed.fetchedAt;pricesStale=pricesStale||feed.stale;}catch{priceError='Token prices are temporarily unavailable.';}}
+  for(const token of tokens){const p=prices.get(token.address);token.priceUsd=p?.priceUsd??null;const value=token.priceUsd===null?null:Number(token.amount)*token.priceUsd;token.valueUsd=value!==null&&Number.isFinite(value)?value:null;token.liquidityUsd=p?.liquidityUsd??null;token.change24h=p?.change24h??null;}
+  return {source,wallet:{address,ownerAddress:wallet.ownerAddress,tradingAddress:wallet.address},native,tokens,history,totalUsd:tokens.every(t=>t.valueUsd!==null)?tokens.reduce((sum,t)=>sum+t.valueUsd,0):null,partial,error:priceError,at:new Date().toISOString(),pricesAt,pricesStale,nativeValueUsd:null};
+}
+export type RhAlert={id:string;userId:string;name:string;kind:'DISCOVERY'|'PRICE_ABOVE'|'PRICE_BELOW'|'LIQUIDITY_BELOW';tokenAddress:string|null;threshold:number|null;minLiquidityUsd:number;delivery:'IN_APP'|'WHATSAPP';enabled:boolean;cooldownMinutes:number;lastMatched:boolean;lastCheckedAt:Date|null;lastTriggeredAt:Date|null;baselineAt:Date|null;lastError:string|null;createdAt:Date};
+export async function alertState(userId:string){return {rules:await db.sql<RhAlert>`SELECT * FROM "RHAlert" WHERE "userId"=${userId} ORDER BY "createdAt" DESC`,events:await db.sql`SELECT * FROM "RHAlertEvent" WHERE "userId"=${userId} ORDER BY "createdAt" DESC LIMIT 40`};}
+export async function tickRhAlerts(options:{limit?:number;deadline?:number}={}){
+  if(process.env.ROBINHOOD_ALERTS_ENABLED==='false')return;const before=new Date(Date.now()-60000),rows=await db.sql<RhAlert>`SELECT * FROM "RHAlert" WHERE enabled=true AND ("lastCheckedAt" IS NULL OR "lastCheckedAt"<${before}) ORDER BY "lastCheckedAt" ASC NULLS FIRST LIMIT ${Math.min(options.limit??20,20)}`;
+  for(const rule of rows){if(options.deadline&&Date.now()>=options.deadline)break;
+    const claimed=await db.sql`UPDATE "RHAlert" SET "lastCheckedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${rule.id} AND enabled=true AND ("lastCheckedAt" IS NULL OR "lastCheckedAt"<${before}) RETURNING id`;if(!claimed.length)continue;
+    try{const user=await db.user.findUnique({where:{id:rule.userId}});if(!user||user.disabled||user.emergencyStop)continue;const feed=await rhFeed('',rule.kind==='DISCOVERY'?undefined:[rule.tokenAddress!]);if(feed.stale)continue;
+      await transaction(async tx=>{await lockUser(tx,rule.userId);const fresh=(await tx.sql<RhAlert>`SELECT * FROM "RHAlert" WHERE id=${rule.id} AND enabled=true`)[0],activeUser=await tx.user.findUnique({where:{id:rule.userId}});if(!fresh||activeUser?.emergencyStop||activeUser?.disabled)return;
+        let hits:RhToken[]=[];if(rule.kind==='DISCOVERY'){
+          for(const token of feed.tokens)await tx.sql`INSERT INTO "RHDiscovery" (address) VALUES (${token.address}) ON CONFLICT (address) DO UPDATE SET "lastSeenAt"=timezone('UTC',CURRENT_TIMESTAMP)`;
+          if(fresh.baselineAt){const since=new Date(Date.now()-3600000),newRows=await tx.sql<{address:string}>`SELECT address FROM "RHDiscovery" WHERE "firstSeenAt">${fresh.baselineAt} AND "firstSeenAt">${since}`;const found=new Set(newRows.map(r=>r.address));hits=feed.tokens.filter(t=>found.has(t.address)&&(t.liquidityUsd??0)>=fresh.minLiquidityUsd).slice(0,5);}
+          else await tx.sql`UPDATE "RHAlert" SET "baselineAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${rule.id}`;
+        }else{const item=feed.tokens[0],metric=rule.kind==='LIQUIDITY_BELOW'?item?.liquidityUsd:item?.priceUsd,match=metric!=null&&(rule.kind==='PRICE_ABOVE'?metric>=rule.threshold!:metric<=rule.threshold!);if(match&&!fresh.lastMatched&&(!fresh.lastTriggeredAt||Date.now()-fresh.lastTriggeredAt.getTime()>=fresh.cooldownMinutes*60000))hits=item?[item]:[];await tx.sql`UPDATE "RHAlert" SET "lastMatched"=${match} WHERE id=${rule.id}`;}
+        for(const token of hits){const dedupe=rule.kind==='DISCOVERY'?rule.id+':'+token.address:rule.id+':'+feed.fetchedAt,id=randomUUID(),title=`${rule.name} · ${token.symbol}`,body=`ROBINHOOD TOKEN ALERT\n${title}\nToken address: ${token.address}\nPrice USD: ${token.priceUsd??'unavailable'}\nLiquidity USD: ${token.liquidityUsd??'unavailable'}\nData at: ${feed.fetchedAt}\n${token.screenerUrl}\nIndexed discovery is not a safety endorsement or a complete launch feed.`;
+          const inserted=await tx.sql`INSERT INTO "RHAlertEvent" (id,"userId","ruleId","dedupeKey",title,body) VALUES (${id},${rule.userId},${rule.id},${dedupe},${title},${body}) ON CONFLICT ("dedupeKey") DO NOTHING RETURNING id`;if(!inserted.length)continue;
+          if(fresh.delivery==='WHATSAPP'){const channel=await tx.personalAgentChannel.findUnique({where:{userId:rule.userId}});if(channel?.enabled&&channel.ownerId)await tx.agentCommand.create({data:{userId:rule.userId,source:'RH_ALERT',externalId:id,text:title,reply:body,status:'COMPLETED',channelId:channel.id,recipientId:channel.ownerId,deliveryStatus:'PENDING'}});}
+          await tx.sql`UPDATE "RHAlert" SET "lastTriggeredAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${rule.id}`;
+        }await tx.sql`UPDATE "RHAlert" SET "lastError"=NULL WHERE id=${rule.id}`;
+      });
+    }catch{await db.sql`UPDATE "RHAlert" SET "lastError"='Provider check failed. Missing or stale observations do not trigger alerts.' WHERE id=${rule.id}`;}
+  }
+}

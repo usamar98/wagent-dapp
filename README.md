@@ -1,69 +1,41 @@
 # Wagent Ai
 
-A Solana-only agent workspace. Create a private token configuration, pair your personal WhatsApp agent, research Solana pools with DEX Screener, and save a private mint-address watchlist. React, Vite, TypeScript, Express, and Supabase PostgreSQL through pg. Prisma is not used.
+A Robinhood Chain agent workspace connected to the user's personal WhatsApp agent. React, Vite, TypeScript, Express and Supabase PostgreSQL through pg. Prisma is not used. Mainnet chain ID **4663**, currency **ETH**.
 
 ## Available now
 
-- MetaMask, Binance Wallet, or Phantom message sign-in for EVM workspace identity. Verify the separate Solana owner account in Binance Wallet, Phantom, Solflare, or another compatible Wallet Standard wallet for trading. No Binance API key is needed.
-- Private agent creation with 1–10 Solana token mints.
-- Agent selection, encrypted personal WhatsApp keys, one-time ownership pairing, manual sync, and background polling.
-- Cloud WhatsApp and alert polling using Supabase Cron and a protected Vercel worker, independent of the owner's computer. See [cloud worker setup and operations](docs/CLOUD-WORKER.md).
-- Real Solana token discovery and mint search from DEX Screener, refreshed every 60 seconds.
-- Liquidity filtering, pool age, volume, mint copying, and direct DEX Screener research links.
-- Private account-scoped watchlists stored in Supabase, with up to 30 mints.
-- Activity history, ownership isolation, and emergency stop.
-- Jupiter exact-input SOL/token swaps with one-use Solana wallet ownership proofs, a review screen, and wallet approval for every transaction.
-- Optional WhatsApp-only trading from a separately funded, server-managed wallet: signed advance permission, approved mints, per-trade/daily SOL budgets, fee and slippage caps, expiry, and revoke access. Owner-signed SOL/token withdrawals return funds to the original owner wallet. See [WhatsApp trading](docs/WHATSAPP-TRADING.md).
-- Guided setup after WhatsApp pairing: connect Binance Wallet or Phantom, create a trading wallet, review and approve a one-time SOL deposit, then sign trading limits. External-wallet/exchange deposits remain available by copying the Solana address. No new API key is required.
-- DEX Screener token discovery, price, and liquidity alerts, delivered in app or to the explicitly selected paired WhatsApp chat.
-- WhatsApp information commands: `Balance`, `Portfolio`, `Token <address>`, `Trade history`, and `My limits`, with on-chain balances and dated DEX Screener estimates. See [commands and withdrawal setup](docs/WHATSAPP-COMMANDS.md).
-- Optional WhatsApp SOL withdrawals to the fixed original owner wallet. Users separately sign withdrawal budgets and expiry on the website once, request an amount in chat, and confirm its unique code within two minutes. `Revoke withdrawals`, `Revoke access`, and `Stop all` block new submissions. Uncertain transfers are checked without automatic resubmission.
+- Private versioned agents and wallet-message workspace sign-in.
+- Creator-only WhatsApp pairing, encrypted personal keys, manual sync and cloud polling independent of the owner's computer.
+- DEX Screener Robinhood discovery, exact-address research, private watchlists, price and liquidity alerts.
+- Separate encrypted EVM trading wallets, original-owner verification, reviewed ETH deposits and **Add ETH** top ups in Portfolio.
+- Reviewed 0x buying/selling, executable minimum-output checks, gas caps and fee disclosure.
+- Advance WhatsApp trading for any supported Robinhood token or a selected list, with per-operation and UTC daily budgets, expiry, slippage, revoke and emergency stop.
+- On-chain portfolios, original tickers, value estimates, sell actions and transaction history for the trading wallet or original owner.
+- Balance, Portfolio, Token details, Trade history, My limits and read-only status commands in WhatsApp.
+- Separate native-ETH WhatsApp withdrawal permission, fixed original recipient, limits, expiry and a single-use two-minute confirmation code.
+- Fresh owner-signed website ETH/ERC-20 recovery.
+- Preserved **Legacy Solana recovery** for original SOL/SPL balances and history. Old keys, lamport budgets and signatures are not converted to EVM authority.
 
-## Coming soon
+## Provider configuration
 
-Automatic take-profit/stop-loss, volume alerts, and agent marketplace licensing remain upcoming. Without active advance permission, personal WhatsApp buy/sell commands return wallet-review links. With permission, the paired owner’s explicit commands can submit trades within the signed limits. Earlier paper records are preserved; paper execution remains in isolated demo/test fixtures only.
+Keep DATABASE_URL, the **original CREDENTIAL_ENCRYPTION_KEY**, APP_URL and DEMO_MODE=false. Add server-only **ROBINHOOD_RPC_URL** (free-plan Alchemy Robinhood mainnet HTTPS endpoint) and **ZEROX_API_KEY** (0x key under your chosen no-subscription plan), then redeploy. See [complete setup](docs/ROBINHOOD.md) and robinhood.env.example.
 
-Coinbase OAuth has been removed. Historical broker database tables and encrypted records are retained for recovery and are not accessed by the active integration. Other markets are not offered or accepted in new configurations. Existing incompatible strategies remain stored and are not runnable.
+Missing credentials show Provider setup required and block live swaps. DEX Screener requires no key. No AI, Coinbase, DEXTools, Birdeye, Robinhood brokerage or Binance Exchange API key is needed. Each user supplies their own personal WhatsApp agent key in Connections.
 
-## Run locally
+No paid subscription, gas sponsor or automatic provider upgrade is configured. Free access has quotas. ETH gas, pool costs and applicable 0x fees are paid by users; 0x may collect positive trade surplus.
 
-Use Node.js 22.12+ (Node 24 recommended):
+## Run and verify
 
-```sh
-npm ci
-npm run setup:env
-# Fill the ignored .env.supabase.local using supabase.env.example.
-# Retain the existing encryption key when using existing data.
-npm run db:migrate:supabase
-npm run dev
-```
+Use Node.js 22.12+ and npm ci. Preserve the existing ignored .env.supabase.local and encryption key. Add the Robinhood variables, run npm run db:migrate:supabase, then npm run dev:supabase. The existing cloud schedule handles WhatsApp and alerts. Use npm run dev only when deliberately starting an additional local worker.
 
-Open http://localhost:5173. The API uses port 4000. The launcher starts the API, Vite, and a local worker against Supabase without seeding hosted data. Once the [cloud schedule](docs/CLOUD-WORKER.md) is enabled, use `npm run dev:supabase` for local development without a duplicate polling process. Production polling runs on Supabase + Vercel while your computer is off; a website deployment without the enabled schedule does not poll chats.
+Run **npm test** and **npm run build**. Tests use isolated embedded PostgreSQL and mocked providers, never funded production wallets. Apply committed SQL migrations before deploying. The new migration retires advance Solana permission while preserving owner-signed recovery.
 
-Core environment: DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY, APP_URL, DEMO_MODE=false, PAYMENT_PROVIDER=stripe_test. Only DATABASE_URL is used, with verified TLS and the included public Supabase CA. Add JUPITER_API_KEY and SOLANA_SWAPS_ENABLED=true for swaps. DEX Screener needs no key. Birdeye, Coinbase, and AI keys are not used. Each user supplies their personal WhatsApp agent key in Connections. See [provider setup and exact Vercel variables](docs/SOLANA-PROVIDERS.md).
+## Controls and limitations
 
-See docs/SUPABASE.md for SQL migrations, encrypted-credential continuity, deployment configuration and RLS. All application tables retain backend-only access. Additive migrations store dedicated encrypted wallet keys, separate signed trading/withdrawal permissions, one-use challenges, confirmation codes, budget reservations, and withdrawals. Existing pairings and data remain intact. Watchlists use a per-user Setting key.
+Sign-in, pairing and deposits grant no spending authority. Wagent stores dedicated-wallet keys encrypted and enforces limits in software, not an on-chain spending contract. A service or encryption-key compromise could put deposited funds at risk. Main-wallet private keys are never requested. Personal agent chats are not end-to-end encrypted.
 
-## Data-source behavior
+Unknown submissions are never automatically repeated. A token approval is identified separately from a swap. Unsupported route layouts are rejected. Discovery is limited to indexed profiles and pools; it is not every new launch. Missing prices remain unavailable; a partial token index is labelled.
 
-- DEX Screener token profiles are discovery candidates, not a complete feed of all Solana launches.
-- Each token is identified by its case-sensitive mint. Only pairs whose chain is solana are returned. The most liquid indexed pair per base mint is selected.
-- Pool creation time is not token mint age. Symbols and names are not verified identities. Liquidity and listings do not certify safety.
-- Provider failures show an error. A cached result may be returned for up to five minutes, explicitly marked stale with its original fetch time. No fabricated prices replace failed responses.
-- Public upstream calls are cached, coalesced, rate-limited, time-bounded, response-size bounded and restricted to a fixed DEX Screener origin. There is no user-supplied upstream URL.
-- Discovery alerts establish a baseline on the first successful scan and then report newly observed mints from the latest Solana profiles. Persistent first-seen records prevent rediscovery after restarts. This is limited discovery coverage, not every token launch. Data APIs do not authorize wallet transactions.
+Automatic stop-loss/take-profit, volume alerts, advanced AI and marketplace licensing remain coming soon.
 
-References: https://docs.dexscreener.com/api/reference.
-
-## Verification
-
-```sh
-npm test
-npm run build
-```
-
-Tests use isolated embedded PostgreSQL fixtures, never hosted application data. npm run dev:demo starts an optional isolated demo. The browser suite in e2e/ describes the Solana discovery, account, builder, and Coming soon flows. Run browser interaction checks through the supported browser tool in agent sessions.
-
-Personal WhatsApp availability depends on the account rollout. Pairing only accepts the agent creator and never stores wallet recovery phrases. Agent chats are not end-to-end encrypted. MetaMask account/network changes end the workspace session. Account sign-in is independent of future Solana swap authorization.
-
-Binance Wallet connection and signing setup: [WhatsApp trading guide](docs/WHATSAPP-TRADING.md#binance-wallet). No Binance API key or additional environment variable is required.
+See [commands](docs/WHATSAPP-COMMANDS.md), [cloud operations](docs/CLOUD-WORKER.md) and [Supabase](docs/SUPABASE.md).

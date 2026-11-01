@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { isSolanaAsset } from './solana.js';
+import {isEvmAddress,ETH_TOKEN} from './robinhood.js';
 
 export const configSchema = z.object({
   schemaVersion: z.literal(1).default(1),
   market: z.literal('crypto'),
-  network: z.literal('solana').default('solana'),
-  symbols: z.array(z.string().refine(isSolanaAsset, 'Choose a Solana token address or supported Solana asset.')).min(1).max(10).refine(a => new Set(a).size === a.length, 'Tokens must be unique'),
+  network: z.enum(['solana','robinhood']).default('solana'),
+  symbols: z.array(z.string()).min(1).max(10).refine(a => new Set(a.map(x=>isEvmAddress(x)?x.toLowerCase():x)).size === a.length, 'Tokens must be unique'),
   timeframe: z.enum(['1m', '5m', '15m', '1h', '4h', '1d']),
   strategy: z.enum(['price_alert', 'rsi', 'ma_crossover', 'portfolio_monitor']),
   entry: z.number().positive().max(10000000),
@@ -21,6 +22,7 @@ export const configSchema = z.object({
   aiInstructions: z.string().max(1000).default(''),
   notifications: z.array(z.enum(['in_app', 'simulator'])).min(1).default(['in_app']),
 }).strict().superRefine((v, ctx) => {
+  if(v.symbols.some(symbol=>v.network==='robinhood'?!isEvmAddress(symbol):!isSolanaAsset(symbol)))ctx.addIssue({code:'custom',message:'Use token addresses for the selected network.',path:['symbols']});
   if(v.strategy === 'ma_crossover' && v.fastPeriod >= v.slowPeriod) ctx.addIssue({ code: 'custom', message: 'Fast period must be smaller than slow period', path: ['fastPeriod'] });
   if(v.strategy === 'rsi' && (v.entry >= v.exit || v.exit > 100)) ctx.addIssue({ code: 'custom', message: 'RSI requires entry < exit ≤ 100', path: ['entry'] });
   if(v.strategy === 'price_alert' && v.entry >= v.exit) ctx.addIssue({ code: 'custom', message: 'Price alert exit must exceed entry', path: ['exit'] });

@@ -1,3 +1,5 @@
+> Legacy Solana reference. New production trading uses Robinhood Chain. See [Robinhood setup and safety](ROBINHOOD.md). Existing Solana funds retain original-owner recovery; these instructions do not enable new Solana execution.
+
 # Solana providers and Vercel environment
 
 Add these variables in the **wagent-ai Vercel project → Settings → Environment Variables**, select Production (and Preview if needed), then redeploy. All values below are server-only; do not prefix keys with `VITE_`.

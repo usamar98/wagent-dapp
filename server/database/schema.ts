@@ -1,6 +1,15 @@
 // Application records stored in Supabase PostgreSQL. Keep in sync with SQL migrations.
 import type { PermissionTokenScope } from '../../shared/permission-scope.js';
+import type {RhWallet,RhPermission,RhOperation} from '../robinhood/access.js';
+import type {RhAlert} from '../robinhood/data.js';
 export interface ModelRows {
+  RHWallet:RhWallet & {createdAt:Date};
+  RHPermission:RhPermission;
+  RHOperation:RhOperation;
+  RHAlert:RhAlert;
+  RHChallenge:{id:string;userId:string;sessionId:string;purpose:string;address:string;message:string;payload:any;expiresAt:Date;createdAt:Date};
+  RHDiscovery:{address:string;firstSeenAt:Date;lastSeenAt:Date};
+  RHAlertEvent:{id:string;userId:string;ruleId:string;dedupeKey:string;title:string;body:string;createdAt:Date};
   SolanaWithdrawalPermission: { id:string; userId:string; channelId:string; channelFingerprint:string; channelOwnerId:string; ownerAddress:string; tradingAddress:string; perWithdrawalLamports:string; dailyLamports:string; maxFeeLamports:string; expiresAt:Date; revokedAt:Date|null; revokeReason:string|null; consentMessage:string; signature:string; createdAt:Date };
   SolanaChatWithdrawal: { id:string; userId:string; commandId:string; executeCommandId:string|null; permissionId:string; walletAddress:string; ownerAddress:string; amount:string; budgetLamports:string; confirmationHash:string; confirmationExpiresAt:Date; status:string; signature:string|null; lastValidBlockHeight:string|null; error:string|null; createdAt:Date; updatedAt:Date };
   SolanaWalletWithdrawal: { id: string; userId: string; walletAddress: string; ownerAddress: string; mint: string; amount: string; signature: string; status: string; lastValidBlockHeight: string; error: string | null; createdAt: Date; updatedAt: Date };
@@ -314,6 +323,13 @@ export interface ModelRows {
 export type ModelName = keyof ModelRows;
 
 export const databaseSchema = {
+  RHWallet:{columns:['userId','address','ownerAddress','encryptedSecret','chainId','createdAt'],primaryKey:['userId'],unique:[['userId'],['address']],generatedId:false,updatedAt:[],json:[],relations:{}},
+  RHPermission:{columns:['id','userId','kind','channelId','fingerprint','recipient','instanceId','ownerAddress','walletAddress','tokenScope','tokens','perLimitWei','dailyLimitWei','maxFeeWei','slippageBps','expiresAt','revokedAt','revokeReason','message','signature','createdAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:[],json:[],relations:{}},
+  RHOperation:{columns:['id','userId','commandId','permissionId','kind','tokenAddress','amount','walletAddress','status','budgetWei','txHash','approvalHash','nonce','data','error','confirmationHash','confirmationExpiresAt','createdAt','updatedAt'],primaryKey:['id'],unique:[['id'],['commandId'],['txHash'],['approvalHash']],generatedId:true,updatedAt:['updatedAt'],json:['data'],relations:{}},
+  RHAlert:{columns:['id','userId','name','kind','tokenAddress','threshold','minLiquidityUsd','delivery','enabled','cooldownMinutes','lastMatched','lastCheckedAt','lastTriggeredAt','baselineAt','lastError','createdAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:[],json:[],relations:{}},
+  RHChallenge:{columns:['id','userId','sessionId','purpose','address','message','payload','expiresAt','createdAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:[],json:['payload'],relations:{}},
+  RHDiscovery:{columns:['address','firstSeenAt','lastSeenAt'],primaryKey:['address'],unique:[['address']],generatedId:false,updatedAt:[],json:[],relations:{}},
+  RHAlertEvent:{columns:['id','userId','ruleId','dedupeKey','title','body','createdAt'],primaryKey:['id'],unique:[['id'],['dedupeKey']],generatedId:true,updatedAt:[],json:[],relations:{}},
   SolanaWithdrawalPermission: { columns:['id','userId','channelId','channelFingerprint','channelOwnerId','ownerAddress','tradingAddress','perWithdrawalLamports','dailyLamports','maxFeeLamports','expiresAt','revokedAt','revokeReason','consentMessage','signature','createdAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:[],json:[],relations:{} },
   SolanaChatWithdrawal: { columns:['id','userId','commandId','executeCommandId','permissionId','walletAddress','ownerAddress','amount','budgetLamports','confirmationHash','confirmationExpiresAt','status','signature','lastValidBlockHeight','error','createdAt','updatedAt'],primaryKey:['id'],unique:[['id'],['commandId'],['executeCommandId'],['signature']],generatedId:true,updatedAt:['updatedAt'],json:[],relations:{} },
   SolanaWalletWithdrawal: { columns:['id','userId','walletAddress','ownerAddress','mint','amount','signature','status','lastValidBlockHeight','error','createdAt','updatedAt'],primaryKey:['id'],unique:[['id'],['signature']],generatedId:true,updatedAt:['updatedAt'],json:[],relations:{} },

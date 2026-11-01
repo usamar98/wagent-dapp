@@ -12,9 +12,11 @@ import { createTradingKey } from './trading-wallet-keys.js';
 import type { ModelRows } from './database/schema.js';
 import { websiteOrigin } from './website-runtime.js';
 import { anySolanaTokenLabel, permissionTokenScopes } from '../shared/permission-scope.js';
+import {robinhoodRelease} from './robinhood/providers.js';
+import {revokeRh} from './robinhood/access.js';
 
 export type TradePermission = ModelRows['SolanaTradePermission'];
-export const chatTradingEnabled = () => !env.demo && providerStatus().swapsEnabled && process.env.SOLANA_CHAT_TRADING_ENABLED !== 'false';
+export const chatTradingEnabled = () => !env.demo && !robinhoodRelease() && providerStatus().swapsEnabled && process.env.SOLANA_CHAT_TRADING_ENABLED !== 'false';
 export const unresolvedChatTrades = ['PREPARING','PREPARED','EXECUTING','UNKNOWN'];
 export function consentWebsite(message:string,origin:string){return message.includes(`\nWebsite: ${websiteOrigin(origin)}\n`);}
 type TokenPermission = Pick<TradePermission,'tokenScope'|'allowedMints'|'consentMessage'>;
@@ -28,6 +30,7 @@ function permissionMatchesAgent(permission:TokenPermission,mints:string[]){retur
 async function channelOrigin(tx:Tx,channel:{appUrl:string|null}){return websiteOrigin(channel.appUrl||(await tx.setting.findUnique({where:{key:'wagent:production-origin'}}))?.value||env.appUrl);}
 async function permissionWebsite(tx:Tx,channel:{appUrl:string|null}){const origin=await channelOrigin(tx,channel);check(origin===websiteOrigin(env.appUrl),409,`Manage this connection's trading permission at ${origin}/chat-trading.`);return origin;}
 export async function revokeTrading(tx: Tx, userId: string, reason: string) {
+  if(robinhoodRelease())await revokeRh(tx,userId,'TRADE',reason);
   await tx.solanaTradePermission.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date(), revokeReason: reason } });
   await tx.solanaPermissionChallenge.deleteMany({ where: { userId, purpose: 'GRANT' } });
   await tx.solanaChatTrade.updateMany({ where: { userId, status: 'PREPARING' }, data: { status: 'CANCELLED', error: reason } });

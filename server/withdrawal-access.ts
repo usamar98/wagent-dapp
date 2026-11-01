@@ -3,8 +3,11 @@ import {db,type Tx} from './db.js';
 import {check} from './security.js';
 import {websiteOrigin} from './website-runtime.js';
 import {humanAmount} from './solana-providers.js';
-export const chatWithdrawalsEnabled=()=>!env.demo&&process.env.SOLANA_CHAT_WITHDRAWALS_ENABLED!=='false';
+import {robinhoodRelease} from './robinhood/providers.js';
+import {revokeRh} from './robinhood/access.js';
+export const chatWithdrawalsEnabled=()=>!env.demo&&!robinhoodRelease()&&process.env.SOLANA_CHAT_WITHDRAWALS_ENABLED!=='false';
 export async function revokeWithdrawals(tx:Tx,userId:string,reason:string){
+  if(robinhoodRelease())await revokeRh(tx,userId,'WITHDRAW',reason);
   await tx.solanaWithdrawalPermission.updateMany({where:{userId,revokedAt:null},data:{revokedAt:new Date(),revokeReason:reason}});
   await tx.solanaPermissionChallenge.deleteMany({where:{userId,purpose:'WITHDRAWAL_GRANT'}});
   await tx.solanaChatWithdrawal.updateMany({where:{userId,status:{in:['AWAITING_CONFIRMATION','PREPARING','PREPARED']}},data:{status:'CANCELLED',error:reason}});

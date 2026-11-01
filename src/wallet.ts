@@ -41,7 +41,7 @@ export async function signInWithWallet(kind:AccountWallet){
   const label={binance:'Binance Wallet',phantom:'Phantom',metamask:'MetaMask'}[kind];
   const provider=await findAccountWallet(kind);if(!provider)throw new Error(`${label} was not detected. ${kind!=='metamask'?`Open this site in ${label}’s DApp browser or install its wallet extension.`:'Open this site in a browser with the MetaMask extension installed.'}`);
   const accounts=await provider.request({method:'eth_requestAccounts'});const address=accounts?.[0];
-  if(typeof address!=='string'||!/^0x[0-9a-fA-F]{40}$/.test(address))throw new Error(`Select an EVM account in ${label} to sign in. Your Solana account is connected separately for trading.`);
+  if(typeof address!=='string'||!/^0x[0-9a-fA-F]{40}$/.test(address))throw new Error(`Select an EVM account in ${label} to sign in. Verify your EVM owner on Robinhood Chain for trading.`);
   const chainHex=await provider.request({method:'eth_chainId'}),chainId=Number(chainHex);
   if(!Number.isSafeInteger(chainId)||chainId<=0||chainId>2147483647)throw new Error('This network is not supported for wallet sign-in. Switch to Ethereum or another supported EVM network.');
   const challenge=await api('/auth/wallet/challenge',{address,chainId});
