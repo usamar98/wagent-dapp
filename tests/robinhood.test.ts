@@ -2,6 +2,7 @@ import {beforeAll,beforeEach,afterEach,afterAll,describe,it,expect,vi} from 'vit
 import {PGlite} from '@electric-sql/pglite';
 import {PGLiteSocketServer} from '@electric-sql/pglite-socket';
 import request from 'supertest';
+import bs58 from 'bs58';
 import {Wallet,Transaction,Interface,keccak256} from 'ethers';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {migrateEmbedded} from '../scripts/database.js';
@@ -108,6 +109,20 @@ describe('Robinhood WhatsApp withdrawal confirmation',()=>{
   it('requires a fresh owner signature for website recovery and never changes its recipient',async()=>{const net=provider();await grant();const preview=await post('/withdrawals/review',{amount:'0.001',maxFeeEth:'0.001',token:ETH_TOKEN});expect(preview.status,JSON.stringify(preview.body)).toBe(200);expect(preview.body.recipient).toBe(owner.address.toLowerCase());expect((await access.latestPermission(userId,'TRADE')).revokedAt).toBeTruthy();const result=await post('/withdrawals/execute',{id:preview.body.review.id,signature:await owner.signMessage(preview.body.review.message)});expect(result.status,JSON.stringify(result.body)).toBe(200);expect(result.body.status).toBe('CONFIRMED');expect(net.sends()).toBe(1);expect((await post('/withdrawals/execute',{id:preview.body.review.id,signature:await owner.signMessage(preview.body.review.message)})).status).toBe(409);expect(net.sends()).toBe(1);});
 });
 describe('Robinhood isolation and migration behavior',()=>{
+  it('identifies legacy withdrawals and checks confirmation without sending or exposing another user’s history',async()=>{
+    const address=bs58.encode(randomBytes(32)),ownerAddress=bs58.encode(randomBytes(32)),mint=bs58.encode(randomBytes(32)),signature=bs58.encode(randomBytes(64));
+    await db.solanaTradingWallet.create({data:{userId,address,ownerAddress,encryptedSecret:'isolated-fixture-key'}});
+    const withdrawal=await db.solanaWalletWithdrawal.create({data:{userId,walletAddress:address,ownerAddress,mint,amount:'0.25',signature,lastValidBlockHeight:'1',status:'UNKNOWN',error:'Submitted; check confirmation.'}});
+    const fetchMock=vi.fn(async(_url:any,init:any)=>{expect(JSON.parse(init.body).method).toBe('getSignatureStatuses');return Response.json({jsonrpc:'2.0',id:1,result:{value:[{err:null,confirmationStatus:'finalized'}]}});});vi.stubGlobal('fetch',fetchMock);
+    try{
+      const state=await client.get('/api/robinhood/legacy');expect(state.body.history).toEqual(expect.arrayContaining([expect.objectContaining({id:withdrawal.id,kind:'WITHDRAWAL',mint,amount:'0.25',status:'UNKNOWN'})]));expect(JSON.stringify(state.body)).not.toContain('isolated-fixture-key');
+      expect((await other.get('/api/robinhood/legacy')).body.history).toEqual([]);
+      const path=`/api/solana/chat-trading/withdrawals/${withdrawal.id}/reconcile`;
+      expect((await other.post(path).set(headers).send({})).status).toBe(404);
+      const checked=await client.post(path).set(headers).send({});expect(checked.status).toBe(200);expect(checked.body.status).toBe('CONFIRMED');expect(checked.body.error).toBeNull();
+      await client.post(path).set(headers).send({});expect(fetchMock).toHaveBeenCalledTimes(1);
+    }finally{await db.solanaWalletWithdrawal.delete({where:{id:withdrawal.id}});await db.solanaTradingWallet.delete({where:{userId}});}
+  });
   it('keeps portfolio history scoped to its owner',async()=>{provider();await grant();await chat('Buy 0.001 ETH of '+TOKEN);const foreignState=await other.get('/api/robinhood/state');expect(foreignState.body.wallet).toBeNull();expect(foreignState.body.operations).toHaveLength(0);});
   it('keeps Solana new execution disabled but recovery routes present',async()=>{expect((await client.post('/api/solana/chat-trading/challenge').set(headers).send({})).status).toBe(409);const recovery=await client.post('/api/solana/chat-trading/withdrawal/challenge').set(headers).send({mint:'So11111111111111111111111111111111111111112',amount:'0.001'});expect(recovery.body.error).toBeTruthy();expect(recovery.body.error).not.toContain('New trading has moved');expect(recovery.body.error).not.toContain('Route not found');});
   it('persists private watchlists with case-normalized identities',async()=>{const first=await post('/watchlist',{address:TOKEN.toUpperCase().replace('0X','0x'),watched:true});expect(first.status).toBe(200);expect(first.body.tokens).toContain(TOKEN);expect((await other.get('/api/robinhood/watchlist')).body.tokens).not.toContain(TOKEN);});
