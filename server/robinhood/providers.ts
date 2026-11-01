@@ -15,6 +15,7 @@ export const settlerAbi = new Interface(['function execute((address recipient,ad
 const registryAbi = new Interface(['function ownerOf(uint256) view returns(address)']);
 const uint = z.string().regex(/^\d{1,78}$/).refine(v => BigInt(v) < 2n ** 256n);
 const address = z.string().regex(/^0x[\da-fA-F]{40}$/).transform(evmAddress);
+const insufficientEth = 'Not enough ETH in the paying Robinhood wallet for the amount and gas. Add ETH to that wallet on Robinhood Chain or enter a smaller amount.';
 export async function fetchBounded(url: string, init: RequestInit = {}, service = 'Provider') {
   try {
     const response = await fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(12000) });
@@ -30,6 +31,7 @@ async function rawRpc(method: string, params: unknown[]) {
   check(endpoint, 503, 'Robinhood setup required: add ROBINHOOD_RPC_URL from your free Alchemy Robinhood mainnet application.');
   let parsed:URL;try{parsed=new URL(endpoint);}catch{throw new AppError(503,'Configure a valid HTTPS Robinhood RPC endpoint.');}check(parsed.protocol === 'https:' && !parsed.username && !parsed.password, 503, 'Configure an HTTPS Robinhood RPC endpoint.');
   const raw = await fetchBounded(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }, 'Robinhood RPC');
+  if (['eth_estimateGas','eth_call'].includes(method) && /insufficient funds for gas(?:\s|\*|$)|insufficient funds for transfer|^insufficient funds$/i.test(String(raw?.error?.message || ''))) throw new AppError(400, insufficientEth);
   check(raw && !raw.error && Object.hasOwn(raw, 'result'), 502, `Robinhood RPC could not complete ${method}. No transaction was retried.`); return raw.result;
 }
 export async function rpc(method: string, params: unknown[] = []): Promise<any> {
@@ -93,9 +95,11 @@ export async function quoteSwap(taker: string, side: 'BUY' | 'SELL', token: stri
 export async function prepareTransaction(from: string, tx: RhTransaction, maxFee: bigint, simulate = true): Promise<RhTransaction> {
   check(tx.chainId === ROBINHOOD_CHAIN_ID, 400, 'Wrong transaction network.');
   const request = { from: evmAddress(from), to: evmAddress(tx.to), data: tx.data, value: hex(BigInt(tx.value)) };
+  const balance = await assetBalance(from);
+  check(balance > BigInt(tx.value), 400, insufficientEth);
   const gasPrice = BigInt(await rpc('eth_gasPrice')) * 125n / 100n, gasLimit = BigInt(await rpc('eth_estimateGas', [request])) * 125n / 100n;
   check(gasLimit > 0n && gasLimit < 10_000_000n && gasPrice > 0n && gasLimit * gasPrice <= maxFee, 400, 'Estimated gas exceeds the approved fee cap.');
-  check(await assetBalance(from) >= BigInt(tx.value) + gasLimit * gasPrice, 400, 'Not enough ETH in the paying Robinhood wallet for the amount and gas.');
+  check(balance >= BigInt(tx.value) + gasLimit * gasPrice, 400, insufficientEth);
   if (simulate) {const result=await rpc('eth_call', [{ ...request, gas: hex(gasLimit), gasPrice: hex(gasPrice) }, 'pending']);for(const method of ['approve','transfer'])if(tx.data.startsWith(erc20.getFunction(method)!.selector)&&result!=='0x'){let ok=false;try{ok=erc20.decodeFunctionResult(method,result)[0]===true;}catch{/* Unknown token return data fails closed. */}check(ok,400,'Token simulation did not confirm a successful '+method+'.');}}
   return { ...tx, gasLimit: gasLimit.toString(), gasPrice: gasPrice.toString() };
 }
