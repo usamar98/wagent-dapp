@@ -53,7 +53,7 @@ Cancel withdrawal cancels an unsigned preview. Revoke trading and Revoke withdra
 
 Migration 20261101100204_robinhood_chain.sql creates seven private RLS-enabled RH tables. It retires old advance Solana grants but preserves encrypted keys, original owners, operations and history. Apply it through the existing migration runner before deployment.
 
-Legacy Solana recovery remains in navigation. Verify the original Solana owner and sign the exact SOL or supported SPL withdrawal. Keep SOL for fees/rent. New Solana swaps, deposits and permissions are disabled. The migration does not bridge assets, reinterpret lamports as wei or turn old keys into EVM wallets.
+The Legacy Solana recovery screen and product links have been retired at the owner’s request; old page URLs redirect to Portfolio. Stored keys, balances and history remain intact, and owner-scoped compatibility APIs are retained. No assets were bridged or converted by removing the screen. New Solana trading remains disabled.
 
 ## Worker alerts and verification
 

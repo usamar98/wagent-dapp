@@ -53,7 +53,7 @@ export async function tokenInfo(token: string) {
 export function rpcQuantity(value:unknown){check(typeof value==='string'&&/^0x[\da-fA-F]{1,64}$/.test(value),502,'RPC returned an unsupported quantity. No zero balance is assumed.');return BigInt(value);}
 export async function assetBalance(wallet: string, token = ETH_TOKEN) { return token === ETH_TOKEN ? rpcQuantity(await rpc('eth_getBalance', [evmAddress(wallet), 'latest'])) : BigInt(await tokenCall(token, 'balanceOf', [evmAddress(wallet)])); }
 export type RhTransaction = { to: string; data: string; value: string; gasLimit?: string; gasPrice?: string; chainId: number };
-export type RhQuote = { side: 'BUY' | 'SELL'; token: string; symbol: string; decimals: number; amount: string; sellToken: string; buyToken: string; sellAmount: string; buyAmount: string; minBuyAmount: string; slippageBps: number; providerFee: { amount: string; token: string } | null; feeNotice: string; expiresAt: string; transaction: RhTransaction; settler: string; approval: { token: string; amount: string } | null };
+export type RhQuote = { side: 'BUY' | 'SELL'; token: string; name?: string; symbol: string; decimals: number; amount: string; sellToken: string; buyToken: string; sellAmount: string; buyAmount: string; minBuyAmount: string; slippageBps: number; providerFee: { amount: string; token: string } | null; feeNotice: string; expiresAt: string; transaction: RhTransaction; settler: string; approval: { token: string; amount: string } | null };
 async function registrySettler(method: 'ownerOf' | 'prev', block: string) {
   const data = await rpc('eth_call', [{ to: registry, data: registryAbi.encodeFunctionData(method, [2]) }, block]);
   try { return evmAddress(registryAbi.decodeFunctionResult(method, data)[0]); }
@@ -112,7 +112,7 @@ export async function quoteSwap(taker: string, side: 'BUY' | 'SELL', token: stri
   if (fee) { check([sellToken, buyToken].includes(fee.token), 400, 'Unsupported provider fee asset.'); check(BigInt(fee.amount) <= BigInt(fee.token === sellToken ? sellAmount : r.buyAmount) / 100n, 400, '0x fee exceeds the 1% provider fee ceiling.'); }
   const transaction = { ...r.transaction, chainId: ROBINHOOD_CHAIN_ID };
   const settler = await verifySettler(quotedSettler(transaction)), approval = side === 'SELL' && BigInt(await tokenCall(token, 'allowance', [taker, holder])) < BigInt(sellAmount) ? { token, amount: sellAmount } : null;
-  const q: RhQuote = { side, token, symbol: info.symbol, decimals: info.decimals, amount, sellToken, buyToken, sellAmount, buyAmount: r.buyAmount, minBuyAmount: r.minBuyAmount, slippageBps, providerFee: fee, feeNotice: readiness().feeNotice, expiresAt: new Date(Date.now() + 45000).toISOString(), transaction, settler, approval };
+  const q: RhQuote = { side, token, name: info.name, symbol: info.symbol, decimals: info.decimals, amount, sellToken, buyToken, sellAmount, buyAmount: r.buyAmount, minBuyAmount: r.minBuyAmount, slippageBps, providerFee: fee, feeNotice: readiness().feeNotice, expiresAt: new Date(Date.now() + 45000).toISOString(), transaction, settler, approval };
   validateSwapData(q, taker); return q;
 }
 export async function prepareTransaction(from: string, tx: RhTransaction, maxFee: bigint, simulate = true): Promise<RhTransaction> {

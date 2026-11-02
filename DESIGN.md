@@ -2,7 +2,7 @@
 
 Preserve the original raster W logo and favicon, near-black violet surfaces, violet primary actions, readable light text and restrained green state accents. Use Segoe UI/system sans, tabular numbers, one-pixel borders and 7–12px corners. Reserve red for failures. No glass, gradient text, fake charts or casino styling. Respect reduced motion.
 
-The current release uses Robinhood Chain mainnet (4663), native ETH gas and EVM 0x token addresses. MetaMask, Binance Wallet and Phantom must expose the same original EVM owner account and support the chain. Never silently select a different installed wallet or confuse Binance Exchange with Binance Wallet. A legacy Solana account is only for legacy recovery. Keep the network and complete address visible because tickers are not unique.
+The current release uses Robinhood Chain mainnet (4663), native ETH gas and EVM 0x token addresses. MetaMask, Binance Wallet and Phantom must expose the same original EVM owner account and support the chain. Never silently select a different installed wallet or confuse Binance Exchange with Binance Wallet. Keep the network and complete address visible because tickers are not unique.
 
 Keep the permanent sidebar with an accessible mobile menu. Use inline numbered setup sections, clear status notices and forms beside review panels; collapse to one column on small screens. Dense tables scroll inside their region. Display missing data as unavailable, cached data with its timestamp and partial portfolios explicitly. Discovery uses aligned search, liquidity and refresh controls, a compact pool-age filter, sorting, result counts and pagination. Tables retain full copyable token addresses and scroll inside their region on mobile. Show partial coverage, data time and useful empty states. Discovery is an indexed feed and not a safety endorsement or complete launch feed.
 
@@ -14,6 +14,6 @@ WhatsApp withdrawal permission is independent, native ETH only and fixed to the 
 
 Portfolio separates trading and owner balances, shows actual on-chain amounts and DEX Screener value estimates, and links Sell to an exact-amount review. Token labels use metadata tickers with exact addresses retained. The review explains minimum output, token approval when needed, gas, slippage, fees and expiry. Missing Alchemy/0x keys show setup required with disabled execution, never fabricated quotes.
 
-Keep Legacy Solana recovery in navigation with balances, preserved history and original-owner withdrawal controls. State that assets were not bridged. Do not remove recovery while funded legacy wallets exist.
+The owner has removed Legacy Solana recovery from the product. Do not show its menu item, page or links; old URLs redirect to Portfolio. Preserve stored keys, balances and signed history. Detailed WhatsApp receipts separate quoted estimates from confirmed receipt transfers and gas; include the original ticker and exact token address.
 
 After a newly confirmed WhatsApp pairing, keep the dismissible, accessible iPhone-style preview on the left for 15 seconds: WhatsApp connected successfully, with blue double ticks. Key saving or failed pairing never triggers success. Ticks illustrate feedback, not Meta verification or actual read-receipt status.

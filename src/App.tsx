@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { Link, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Activity, ArrowDownUp, ArrowRight, ArrowUpRight, Bell, BookOpen, Check, ChevronRight, Compass, ExternalLink, Layers, LogOut, Menu, MessageCircle, Plus, Search, ShieldCheck, Star, Wallet, Workflow, X } from 'lucide-react';
 import { api, date } from './api';
 import { configSchema, defaultConfig } from '../shared/config';
@@ -13,7 +13,6 @@ const RobinhoodTrade = lazy(() => import('./robinhood-trade'));
 const RobinhoodAlerts = lazy(() => import('./robinhood-alerts'));
 const ChatTrading = lazy(() => import('./robinhood-setup'));
 const Portfolio = lazy(() => import('./robinhood-portfolio'));
-const LegacyRecovery = lazy(() => import('./legacy-solana'));
 
 type User = { id: string; name: string; walletAddress: string; emergencyStop: boolean };
 type Boot = { user: User | null; demo: boolean };
@@ -23,7 +22,7 @@ const navigation = [
   { to: '/library', label: 'My agents', icon: Layers }, { to: '/connections', label: 'WhatsApp connection', icon: MessageCircle },
   { to: '/chat-trading', label: 'WhatsApp trading', icon: ShieldCheck },
 ];
-const research = [{ to: '/tokens', label: 'Token explorer', icon: Search }, { to: '/watchlist', label: 'Watchlist', icon: Star }, { to: '/legacy-solana', label: 'Legacy Solana recovery', icon: ShieldCheck }, { to: '/trade', label: 'Buy & sell', icon: ArrowDownUp }, { to: '/alerts', label: 'Token alerts', icon: Bell }];
+const research = [{ to: '/tokens', label: 'Token explorer', icon: Search }, { to: '/watchlist', label: 'Watchlist', icon: Star }, { to: '/trade', label: 'Buy & sell', icon: ArrowDownUp }, { to: '/alerts', label: 'Token alerts', icon: Bell }];
 const future = [{ to: '/marketplace', label: 'Agent marketplace', icon: Layers }];
 
 function Logo() { return <Link to="/" className={s.logo}><span><img src="/brand-logo.png" alt=""/></span><strong>Wagent <b>Ai</b></strong></Link>; }
@@ -67,7 +66,7 @@ export default function App() {
           <Route path="/auth" element={<Auth user={user} refresh={refresh}/>}/><Route path="/builder" element={<Protected user={user}><Builder/></Protected>}/><Route path="/library" element={<Protected user={user}><MyAgents/></Protected>}/>
           <Route path="/connections" element={<Protected user={user}>{user && <ConnectionsHub key={user.id} user={user} refresh={refresh}/>}</Protected>}/><Route path="/activity" element={<Protected user={user}><ActivityPage/></Protected>}/>
           <Route path="/chat-trading" element={<Protected user={user}><Suspense fallback={<LoadingRows/>}><ChatTrading key={user?.id}/></Suspense></Protected>}/>
-          <Route path="/legacy-solana" element={<Protected user={user}><Suspense fallback={<LoadingRows/>}><LegacyRecovery key={user?.id}/></Suspense></Protected>}/>
+          <Route path="/legacy-solana" element={<Navigate to="/portfolio" replace/>}/>
           <Route path="/portfolio" element={<Protected user={user}><Suspense fallback={<LoadingRows/>}><Portfolio key={user?.id}/></Suspense></Protected>}/>
           <Route path="/trade" element={<Protected user={user}><Suspense fallback={<LoadingRows/>}><RobinhoodTrade key={user?.id}/></Suspense></Protected>}/><Route path="/alerts" element={<Protected user={user}><Suspense fallback={<LoadingRows/>}><RobinhoodAlerts key={user?.id}/></Suspense></Protected>}/><Route path="/marketplace" element={<ComingSoon feature="marketplace"/>}/><Route path="/docs" element={<Docs/>}/>
           <Route path="*" element={<div className={s.empty}><h1>This page has moved.</h1><p>Wagent Ai now focuses on Robinhood Chain agents and token research.</p><Link className={s.button} to="/">Back to overview</Link></div>}/>

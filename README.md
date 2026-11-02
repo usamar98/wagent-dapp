@@ -14,7 +14,7 @@ A Robinhood Chain agent workspace connected to the user's personal WhatsApp agen
 - Balance, Portfolio, Token details, Trade history, My limits and read-only status commands in WhatsApp.
 - Separate native-ETH WhatsApp withdrawal permission, fixed original recipient, limits, expiry and a single-use two-minute confirmation code.
 - Fresh owner-signed website ETH/ERC-20 recovery.
-- Preserved **Legacy Solana recovery** for original SOL/SPL balances and history. Old keys, lamport budgets and signatures are not converted to EVM authority.
+- Detailed WhatsApp receipts with token identity, quoted output, slippage, quoted 0x fees, receipt-derived token changes, gas paid, block, portfolio link and transaction references.
 
 ## Provider configuration
 

@@ -77,7 +77,7 @@ app.use('/api/robinhood',rhRouter);
 // Existing funded Solana wallets retain read access, owner proofs and recovery withdrawals.
 app.use('/api/solana',(req,_res,next)=>{
   if(!robinhoodRelease()||req.method==='GET'||/^\/(wallet\/(challenge|verify)|chat-trading\/(withdrawal(?:\/challenge)?|withdrawals\/[^/]+\/reconcile|trades\/[^/]+\/reconcile|revoke)|portfolio\/.*reconcile)$/.test(req.path))return next();
-  next(new AppError(409,'New trading has moved to Robinhood Chain. Existing Solana funds remain available in Legacy Solana recovery.'));
+  next(new AppError(409,'New trading has moved to Robinhood Chain. Use the Robinhood trading workspace.'));
 });
 app.use('/api/solana', chatExecutionRouter);
 app.use('/api/solana', solanaPermissionsRouter);

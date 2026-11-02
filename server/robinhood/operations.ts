@@ -2,8 +2,10 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { keccak256, verifyMessage } from 'ethers';
 import { db, transaction, lockUser, type Tx } from '../db.js';
 import { check, AppError, hash } from '../security.js';
+import { env } from '../env.js';
 import { assetBalance, ETH_TOKEN, erc20, evmAddress, fromWei, hex, holder, verifySettler, prepareTransaction, quoteSwap, ROBINHOOD_CHAIN_ID, rpc, signEvmTransaction, tokenInfo, transactionHash, validateSwapData, weiAmount, type RhQuote, type RhTransaction } from './providers.js';
 import { assertIdle, dailyUsage, openKey, pendingStates, validatePermission, walletFor, type ChatContext, type RhOperation, type RhWallet } from './access.js';
+import { receiptDetails, type ReceiptDetails } from './receipt.js';
 export async function operationFor(userId:string,id:string,tx:Tx=db) {return (await tx.sql<RhOperation>`SELECT * FROM "RHOperation" WHERE id=${id} AND "userId"=${userId}`)[0]||null;}
 export async function operationList(userId:string,tx:Tx=db) {return tx.sql<RhOperation>`SELECT * FROM "RHOperation" WHERE "userId"=${userId} ORDER BY "createdAt" DESC,id DESC LIMIT 30`;}
 export function operationPresentation(op:RhOperation) {
@@ -91,7 +93,8 @@ export async function executeOperation(userId:string,id:string,context?:ChatCont
       if(!result.receipt)for(let i=0;i<6;i++){await new Promise(resolve=>setTimeout(resolve,800));result.receipt=await rpc('eth_getTransactionReceipt',[result.hash]).catch(()=>null);if(result.receipt)break;}
       if(!result.receipt)return (await operationFor(userId,id))!;
       if(result.receipt.status!=='0x1'){await db.sql`UPDATE "RHOperation" SET status='FAILED',error='Token approval failed. No swap was submitted.',"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${id}`;return (await operationFor(userId,id))!;}
-      await db.sql`UPDATE "RHOperation" SET status='APPROVAL_CONFIRMED',"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${id}`;op=(await operationFor(userId,id))!;
+      const approvalReceipt=receiptDetails(result.receipt,result.hash,op.walletAddress,op.tokenAddress);
+      await db.sql`UPDATE "RHOperation" SET status='APPROVAL_CONFIRMED',data=jsonb_set(data,'{approvalReceipt}',${JSON.stringify(approvalReceipt)}::jsonb),"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${id} AND "userId"=${userId}`;op=(await operationFor(userId,id))!;
     }
     const tx=await prepareTransaction(op.walletAddress,q.transaction,await gasRemaining(op));await sendOnce(op,tx,'SWAP',context);return reconcileOperation(userId,id);
   } catch(error) {
@@ -102,9 +105,10 @@ export async function executeOperation(userId:string,id:string,context?:ChatCont
 }
 export async function reconcileOperation(userId:string,id:string) {
   const op=await operationFor(userId,id);check(op,404,'Operation not found.');
-  if(!pendingStates.includes(op.status))return op;
+  const refreshReceipt=!!(op.txHash||op.approvalHash)&&['CONFIRMED','FAILED','APPROVAL_ONLY'].includes(op.status)&&!op.data.receipt;
+  if(!pendingStates.includes(op.status)&&!refreshReceipt)return op;
   const signature=op.txHash||op.approvalHash;
-  if(signature){const receipt=await rpc('eth_getTransactionReceipt',[signature]).catch(()=>null);if(receipt){const status=receipt.status==='0x1'?(op.txHash?'CONFIRMED':'APPROVAL_ONLY'):'FAILED';await db.sql`UPDATE "RHOperation" SET status=${status},error=${!op.txHash?'Only token approval completed. No swap was submitted; send a fresh order after checking limits.':receipt.status==='0x1'?null:'Transaction failed on-chain. Gas may still apply.'},"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${id}`;}}
+  if(signature){const receipt=await rpc('eth_getTransactionReceipt',[signature]).catch(()=>null);if(receipt){const status=refreshReceipt?op.status:receipt.status==='0x1'?(op.txHash?'CONFIRMED':'APPROVAL_ONLY'):'FAILED',details=receiptDetails(receipt,signature,op.walletAddress,op.tokenAddress);await db.sql`UPDATE "RHOperation" SET status=${status},data=jsonb_set(data,'{receipt}',${JSON.stringify(details)}::jsonb),error=${refreshReceipt?op.error:!op.txHash?'Only token approval completed. No swap was submitted; send a fresh order after checking limits.':receipt.status==='0x1'?null:'Transaction failed on-chain. Gas may still apply.'},"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${id} AND "userId"=${userId}`;}}
   else if(Date.now()-op.updatedAt.getTime()>120000)await db.sql`UPDATE "RHOperation" SET status='CANCELLED',error='Preparation expired before signing.',"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${id}`;
   return (await operationFor(userId,id))!;
 }
@@ -112,5 +116,26 @@ export function operationReply(op:RhOperation) {
   const presentation=operationPresentation(op);
   const title=op.status==='CONFIRMED'?'CONFIRMED':op.status==='PREVIEW'?presentation.statusLabel.toUpperCase():op.status==='APPROVAL_ONLY'?'APPROVAL ONLY · SWAP NOT SUBMITTED':['REJECTED','CANCELLED','FAILED'].includes(op.status)?'NOT EXECUTED':!op.txHash&&!op.approvalHash?'PREPARING · NOT SUBMITTED':'CONFIRMATION PENDING';
   const q=op.data.quote as RhQuote|undefined;
-  return `ROBINHOOD ${title} · ${op.kind==='BUY'?`Buy with ${op.amount} ETH`:op.kind==='SELL'?`Sell ${op.amount} ${q?.symbol||'tokens'}`:`Withdraw ${op.amount} ${op.data.assetSymbol||(op.tokenAddress===ETH_TOKEN?'ETH':'tokens')}`}\n${op.kind!=='WITHDRAW'?`Token address: ${op.tokenAddress}\n`: `Recipient: ${op.data.recipient}\n`}Trading wallet: ${op.walletAddress}\nRequested at (UTC): ${op.createdAt.toISOString()}\n${q?`Minimum receive: ${fromWei(q.minBuyAmount,op.kind==='BUY'?q.decimals:18)} ${op.kind==='BUY'?q.symbol:'ETH'}\n`:''}${presentation.statusDescription?presentation.statusDescription+'\n':''}${op.error?op.error+'\n':''}${op.txHash?'https://robinhoodchain.blockscout.com/tx/'+op.txHash+'\n':''}${op.approvalHash?'Approval transaction: https://robinhoodchain.blockscout.com/tx/'+op.approvalHash+'\n':''}Reference: ${op.id}${pendingStates.includes(op.status)?'\nDo not resend. Check trade or Check withdrawal reads status without repeating the operation.':''}`;
+  const lines=[`ROBINHOOD ${title} · ${op.kind==='BUY'?`Buy with ${op.amount} ETH`:op.kind==='SELL'?`Sell ${op.amount} ${q?.symbol||'tokens'}`:`Withdraw ${op.amount} ${op.data.assetSymbol||(op.tokenAddress===ETH_TOKEN?'ETH':'tokens')}`}`,'Network: Robinhood Chain · 4663'];
+  if(q)lines.push(`Token: ${q.name&&q.name!==q.symbol?q.name+' ('+q.symbol+')':q.symbol}`);
+  lines.push(op.kind!=='WITHDRAW'?`Token address: ${op.tokenAddress}`:`Recipient: ${op.data.recipient}`,`Trading wallet: ${op.walletAddress}`,`Requested at (UTC): ${op.createdAt.toISOString()}`);
+  if(q){
+    const output=op.kind==='BUY'?q.symbol:'ETH',decimals=op.kind==='BUY'?q.decimals:18;
+    lines.push(`Quoted expected receive: ${fromWei(q.buyAmount,decimals)} ${output}`,`Minimum receive (quote protection): ${fromWei(q.minBuyAmount,decimals)} ${output}`,`Slippage limit: ${q.slippageBps/100}%`);
+    lines.push(q.providerFee?`0x fee (quoted): ${fromWei(q.providerFee.amount,q.providerFee.token===q.token?q.decimals:18)} ${q.providerFee.token===q.token?q.symbol:'ETH'} · included in quote`:'0x fee (quoted): no separate fee');
+  }
+  const receipt=op.data.receipt as ReceiptDetails|null|undefined,approval=op.data.approvalReceipt as ReceiptDetails|null|undefined;
+  if(op.status==='CONFIRMED'&&q)lines.push(receipt?.tokenChangeRaw!=null?`Net ${q.symbol} change (receipt transfers): ${fromWei(receipt.tokenChangeRaw,q.decimals)}`:'Actual token change: unavailable from receipt; check Portfolio.');
+  if(receipt?.gasPaidWei!=null)lines.push(`${op.txHash?(op.kind==='WITHDRAW'?'Withdrawal':'Swap'):'Approval'} gas paid: ${fromWei(receipt.gasPaidWei)} ETH`);
+  if(op.txHash&&approval?.gasPaidWei!=null)lines.push(`Approval gas paid: ${fromWei(approval.gasPaidWei)} ETH`);
+  if(op.data.maxFeeWei)lines.push(`Approved gas cap: ${fromWei(op.data.maxFeeWei)} ETH`);
+  if(receipt?.blockNumber)lines.push(`Block: ${receipt.blockNumber}`);
+  if(presentation.statusDescription)lines.push(presentation.statusDescription);
+  if(op.error)lines.push(op.error);
+  if(op.txHash)lines.push('Transaction: https://robinhoodchain.blockscout.com/tx/'+op.txHash);
+  if(op.approvalHash)lines.push('Approval transaction: https://robinhoodchain.blockscout.com/tx/'+op.approvalHash);
+  lines.push(`Reference: ${op.id}`,`Portfolio: ${new URL('/portfolio',env.appUrl)}`);
+  if(pendingStates.includes(op.status))lines.push('Do not resend. Check trade or Check withdrawal reads status without repeating the operation.');
+  else if(op.status==='CONFIRMED'&&op.kind!=='WITHDRAW')lines.push('Send Portfolio for current holdings, Balance for ETH, or Check trade '+op.id+' for this receipt.');
+  return lines.join('\n');
 }

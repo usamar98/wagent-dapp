@@ -67,7 +67,7 @@ export async function reconcileChatTrade(userId:string,id:string){
 }
 async function executeQueuedTrade(commandId:string,context:ChannelContext){
   if((await import('./robinhood/providers.js')).robinhoodRelease()){
-    await transaction(async tx=>{const command=await tx.agentCommand.findUniqueOrThrow({where:{id:commandId}});await lockUser(tx,command.userId);await activeChannel(tx,command,context);await tx.agentCommand.updateMany({where:{id:commandId,status:'TRADE_QUEUED'},data:{status:'REJECTED',reply:'NOT EXECUTED · New trading has moved to Robinhood Chain. Legacy Solana recovery remains available on the website.'}});await tx.solanaChatTrade.updateMany({where:{commandId,status:'PREPARING',signature:null},data:{status:'CANCELLED',error:'New Solana execution disabled by chain migration.'}});});return;
+    await transaction(async tx=>{const command=await tx.agentCommand.findUniqueOrThrow({where:{id:commandId}});await lockUser(tx,command.userId);await activeChannel(tx,command,context);await tx.agentCommand.updateMany({where:{id:commandId,status:'TRADE_QUEUED'},data:{status:'REJECTED',reply:'NOT EXECUTED · New trading has moved to Robinhood Chain. Use your Robinhood trading workspace.'}});await tx.solanaChatTrade.updateMany({where:{commandId,status:'PREPARING',signature:null},data:{status:'CANCELLED',error:'New Solana execution disabled by chain migration.'}});});return;
   }
   const claimed=await transaction(async tx=>{
     const command=await tx.agentCommand.findUniqueOrThrow({where:{id:commandId}});await lockUser(tx,command.userId);await activeChannel(tx,command,context);
