@@ -9,7 +9,7 @@ import s from './solana.module.css';
 import r from './robinhood.module.css';
 export type RhProof={id:string;message:string;address:string;expiresAt:string};
 export type RhPermission={id:string;active:boolean;kind:'TRADE'|'WITHDRAW';tokenScope:'ANY_ROBINHOOD'|'SELECTED_TOKENS';tokens:string[];perLimitEth:string;dailyEth:string;maxFeeEth:string;slippageBps:number;expiresAt:string;revokedAt:string|null;revokeReason:string|null};
-export type RhOperation={id:string;kind:string;tokenAddress:string;amount:string;assetSymbol?:string;walletAddress:string;status:string;txHash:string|null;approvalHash:string|null;error:string|null;createdAt:string;quote?:{symbol:string;minimumReceive:string;outputSymbol:string}};
+export type RhOperation={id:string;kind:string;tokenAddress:string;amount:string;assetSymbol?:string;walletAddress:string;status:string;statusLabel?:string;statusDescription?:string|null;origin?:'WEBSITE'|'WHATSAPP';txHash:string|null;approvalHash:string|null;error:string|null;createdAt:string;quote?:{symbol:string;minimumReceive:string;outputSymbol:string}};
 export type RhState={providers:{rpc:boolean;swaps:boolean;currency:string;feeNotice:string};wallet:{address:string;ownerAddress:string}|null;native:string|null;balanceError:string|null;paired:boolean;agent:{id:string;name:string}|null;workerOnline:boolean;tradePermission:RhPermission|null;withdrawalPermission:RhPermission|null;usedTradingEth:string;usedWithdrawalEth:string;operations:RhOperation[]};
 export function WalletChoice({value,onChange,disabled}:{value:AccountWallet;onChange:(v:AccountWallet)=>void;disabled:boolean}){return <label className={s.field}>Owner wallet app<select value={value} disabled={disabled} onChange={e=>onChange(e.target.value as AccountWallet)}><option value="metamask">MetaMask</option><option value="binance">Binance Wallet</option><option value="phantom">Phantom</option></select><small>Use an EVM account on Robinhood Chain. Your exchange balance and legacy Solana account are separate.</small></label>;}
 export function SetupRequired({providers}:{providers:RhState['providers']}){return !providers.rpc||!providers.swaps?<div className={r.status} role="status"><strong>Provider setup required</strong><p>Add server-only <code>ROBINHOOD_RPC_URL</code> for Alchemy Robinhood mainnet and <code>ZEROX_API_KEY</code> in Vercel, then redeploy. API access stays on the plans you choose; this app does not purchase subscriptions. Live quotes and execution remain unavailable until configured.</p></div>:null;}
@@ -39,7 +39,20 @@ function PermissionForm({kind,permission,owner,walletKind,ready,onDone}:{kind:'T
     </details>{!ready&&<p className={r.fee}>Finish the required connection and provider setup before approval.</p>}{error&&<Notice error>{error}</Notice>}
   </section>;
 }
-export function Operations({items,onCheck,busy=false}:{items:RhOperation[];onCheck:(id:string)=>void;busy?:boolean}){return <section className={r.section}><h2>Recent Robinhood activity</h2>{!items.length?<p>No Robinhood transactions recorded.</p>:items.slice(0,12).map(item=><div className={r.section} key={item.id}><div className={r.headingRow}><strong>{item.kind} {item.amount} {item.kind==='BUY'?'ETH':item.kind==='WITHDRAW'?(item.assetSymbol||'tokens'):item.quote?.symbol||'tokens'}</strong><span>{item.status}</span></div><p className={r.fee}>{date(item.createdAt)} · Reference {item.id}</p>{item.error&&<p>{item.error}</p>}{item.quote&&<p>Minimum receive: {item.quote.minimumReceive} {item.quote.outputSymbol}</p>}<div className={r.actions}>{item.txHash&&<a className={s.textLink} href={`${RH_EXPLORER}/tx/${item.txHash}`} target="_blank" rel="noreferrer">Transaction ↗</a>}{item.approvalHash&&<a className={s.textLink} href={`${RH_EXPLORER}/tx/${item.approvalHash}`} target="_blank" rel="noreferrer">Token approval ↗</a>}<button className={s.textLink} disabled={busy} onClick={()=>onCheck(item.id)}>Check status</button></div></div>)}</section>;}
+export function Operations({items,onCheck,busy=false}:{items:RhOperation[];onCheck:(id:string)=>void;busy?:boolean}){
+  return <section className={r.section}><h2>Recent Robinhood activity</h2>{!items.length?<p>No Robinhood transactions recorded.</p>:items.slice(0,12).map(item=>{
+    const quoteOnly=item.status==='PREVIEW'&&item.kind!=='WITHDRAW';
+    return <div className={r.section} key={item.id}>
+      <div className={r.headingRow}><strong>{item.kind} {item.amount} {item.kind==='BUY'?'ETH':item.kind==='WITHDRAW'?(item.assetSymbol||'tokens'):item.quote?.symbol||'tokens'}</strong><span>{item.statusLabel||(quoteOnly?'Quote only · Not submitted':item.status)}</span></div>
+      <p className={r.fee}>{item.origin==='WEBSITE'?'Website':item.origin==='WHATSAPP'?'WhatsApp':''} · {date(item.createdAt)} · Reference {item.id}</p>
+      {item.statusDescription&&<p>{item.statusDescription}</p>}{item.error&&<p>{item.error}</p>}
+      {item.quote&&<p>{quoteOnly?'Quoted minimum receive':'Minimum receive'}: {item.quote.minimumReceive} {item.quote.outputSymbol}</p>}
+      <div className={r.actions}>{item.txHash&&<a className={s.textLink} href={`${RH_EXPLORER}/tx/${item.txHash}`} target="_blank" rel="noreferrer">Transaction ↗</a>}{item.approvalHash&&<a className={s.textLink} href={`${RH_EXPLORER}/tx/${item.approvalHash}`} target="_blank" rel="noreferrer">Token approval ↗</a>}
+        {quoteOnly?<Link className={s.textLink} to={'/trade?'+new URLSearchParams({side:item.kind,token:item.tokenAddress,amount:item.amount})}>Review a new website quote</Link>:<button className={s.textLink} disabled={busy} onClick={()=>onCheck(item.id)}>Check status</button>}
+      </div>
+    </div>;
+  })}</section>;
+}
 export default function RobinhoodSetup(){
   const state=useResource<RhState>('/robinhood/state',true,15000),[kind,setKind]=useState<AccountWallet>(signedInWalletKind()),[custody,setCustody]=useState(false),[proof,setProof]=useState<RhProof|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');const data=state.data;
   async function act(work:()=>Promise<void>){setBusy(true);setError('');try{await work();await state.reload();}catch(e){setError(walletError(e));}finally{setBusy(false);}}

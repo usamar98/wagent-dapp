@@ -6,6 +6,16 @@ import { assetBalance, ETH_TOKEN, erc20, evmAddress, fromWei, hex, holder, verif
 import { assertIdle, dailyUsage, openKey, pendingStates, validatePermission, walletFor, type ChatContext, type RhOperation, type RhWallet } from './access.js';
 export async function operationFor(userId:string,id:string,tx:Tx=db) {return (await tx.sql<RhOperation>`SELECT * FROM "RHOperation" WHERE id=${id} AND "userId"=${userId}`)[0]||null;}
 export async function operationList(userId:string,tx:Tx=db) {return tx.sql<RhOperation>`SELECT * FROM "RHOperation" WHERE "userId"=${userId} ORDER BY "createdAt" DESC,id DESC LIMIT 30`;}
+export function operationPresentation(op:RhOperation) {
+  if(op.status!=='PREVIEW')return {statusLabel:op.status.replaceAll('_',' '),statusDescription:null};
+  const expiry=op.confirmationExpiresAt||op.data.reviewExpiry||op.data.quote?.expiresAt;
+  const expired=!!expiry&&new Date(expiry).getTime()<=Date.now();
+  if(op.kind!=='WITHDRAW')return {
+    statusLabel:expired?'Quote expired · Not submitted':'Quote only · Not submitted',
+    statusDescription:'This website quote did not buy or sell tokens. With active trading permission, send a new Buy or Sell command in your paired WhatsApp chat. Status checks never submit an order.',
+  };
+  return {statusLabel:expired?'Withdrawal review expired · Not sent':'Withdrawal awaiting approval · Not sent',statusDescription:op.permissionId?'No funds have been sent. An unexpired withdrawal requires its unique CONFIRM WITHDRAW code in your paired chat.':'No funds have been sent. This website withdrawal requires a fresh signature from the original owner.'};
+}
 export async function queueOperation(tx:Tx,userId:string,kind:RhOperation['kind'],tokenAddress:string,amount:string,wallet:RhWallet,permissionId:string|null,commandId:string|null,data:any={},status='QUEUED') {
   await assertIdle(tx,userId);const id=randomUUID();
   const op=(await tx.sql<RhOperation>`INSERT INTO "RHOperation" (id,"userId","commandId","permissionId",kind,"tokenAddress",amount,"walletAddress",status,data) VALUES (${id},${userId},${commandId},${permissionId},${kind},${evmAddress(tokenAddress)},${amount},${wallet.address},${status},${JSON.stringify(data)}::jsonb) RETURNING *`)[0];return op;
@@ -99,7 +109,8 @@ export async function reconcileOperation(userId:string,id:string) {
   return (await operationFor(userId,id))!;
 }
 export function operationReply(op:RhOperation) {
-  const title=op.status==='CONFIRMED'?'CONFIRMED':op.status==='PREVIEW'?'AWAITING YOUR CONFIRMATION · NOT SUBMITTED':op.status==='APPROVAL_ONLY'?'APPROVAL ONLY · SWAP NOT SUBMITTED':['REJECTED','CANCELLED','FAILED'].includes(op.status)?'NOT EXECUTED':!op.txHash&&!op.approvalHash?'PREPARING · NOT SUBMITTED':'CONFIRMATION PENDING';
+  const presentation=operationPresentation(op);
+  const title=op.status==='CONFIRMED'?'CONFIRMED':op.status==='PREVIEW'?presentation.statusLabel.toUpperCase():op.status==='APPROVAL_ONLY'?'APPROVAL ONLY · SWAP NOT SUBMITTED':['REJECTED','CANCELLED','FAILED'].includes(op.status)?'NOT EXECUTED':!op.txHash&&!op.approvalHash?'PREPARING · NOT SUBMITTED':'CONFIRMATION PENDING';
   const q=op.data.quote as RhQuote|undefined;
-  return `ROBINHOOD ${title} · ${op.kind==='BUY'?`Buy with ${op.amount} ETH`:op.kind==='SELL'?`Sell ${op.amount} ${q?.symbol||'tokens'}`:`Withdraw ${op.amount} ${op.data.assetSymbol||(op.tokenAddress===ETH_TOKEN?'ETH':'tokens')}`}\n${op.kind!=='WITHDRAW'?`Token address: ${op.tokenAddress}\n`: `Recipient: ${op.data.recipient}\n`}Trading wallet: ${op.walletAddress}\nRequested at (UTC): ${op.createdAt.toISOString()}\n${q?`Minimum receive: ${fromWei(q.minBuyAmount,op.kind==='BUY'?q.decimals:18)} ${op.kind==='BUY'?q.symbol:'ETH'}\n`:''}${op.error?op.error+'\n':''}${op.txHash?'https://robinhoodchain.blockscout.com/tx/'+op.txHash+'\n':''}${op.approvalHash?'Approval transaction: https://robinhoodchain.blockscout.com/tx/'+op.approvalHash+'\n':''}Reference: ${op.id}${pendingStates.includes(op.status)?'\nDo not resend. Check trade or Check withdrawal reads status without repeating the operation.':''}`;
+  return `ROBINHOOD ${title} · ${op.kind==='BUY'?`Buy with ${op.amount} ETH`:op.kind==='SELL'?`Sell ${op.amount} ${q?.symbol||'tokens'}`:`Withdraw ${op.amount} ${op.data.assetSymbol||(op.tokenAddress===ETH_TOKEN?'ETH':'tokens')}`}\n${op.kind!=='WITHDRAW'?`Token address: ${op.tokenAddress}\n`: `Recipient: ${op.data.recipient}\n`}Trading wallet: ${op.walletAddress}\nRequested at (UTC): ${op.createdAt.toISOString()}\n${q?`Minimum receive: ${fromWei(q.minBuyAmount,op.kind==='BUY'?q.decimals:18)} ${op.kind==='BUY'?q.symbol:'ETH'}\n`:''}${presentation.statusDescription?presentation.statusDescription+'\n':''}${op.error?op.error+'\n':''}${op.txHash?'https://robinhoodchain.blockscout.com/tx/'+op.txHash+'\n':''}${op.approvalHash?'Approval transaction: https://robinhoodchain.blockscout.com/tx/'+op.approvalHash+'\n':''}Reference: ${op.id}${pendingStates.includes(op.status)?'\nDo not resend. Check trade or Check withdrawal reads status without repeating the operation.':''}`;
 }
