@@ -2,7 +2,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { keccak256, verifyMessage } from 'ethers';
 import { db, transaction, lockUser, type Tx } from '../db.js';
 import { check, AppError, hash } from '../security.js';
-import { assetBalance, ETH_TOKEN, erc20, evmAddress, fromWei, hex, holder, latestSettler, prepareTransaction, quoteSwap, ROBINHOOD_CHAIN_ID, rpc, signEvmTransaction, tokenInfo, transactionHash, validateSwapData, weiAmount, type RhQuote, type RhTransaction } from './providers.js';
+import { assetBalance, ETH_TOKEN, erc20, evmAddress, fromWei, hex, holder, verifySettler, prepareTransaction, quoteSwap, ROBINHOOD_CHAIN_ID, rpc, signEvmTransaction, tokenInfo, transactionHash, validateSwapData, weiAmount, type RhQuote, type RhTransaction } from './providers.js';
 import { assertIdle, dailyUsage, openKey, pendingStates, validatePermission, walletFor, type ChatContext, type RhOperation, type RhWallet } from './access.js';
 export async function operationFor(userId:string,id:string,tx:Tx=db) {return (await tx.sql<RhOperation>`SELECT * FROM "RHOperation" WHERE id=${id} AND "userId"=${userId}`)[0]||null;}
 export async function operationList(userId:string,tx:Tx=db) {return tx.sql<RhOperation>`SELECT * FROM "RHOperation" WHERE "userId"=${userId} ORDER BY "createdAt" DESC,id DESC LIMIT 30`;}
@@ -50,7 +50,7 @@ async function gasRemaining(op:RhOperation) {
 async function sendOnce(op:RhOperation,tx:RhTransaction,phase:'APPROVAL'|'SWAP'|'WITHDRAW',context?:ChatContext) {
   const access=await transaction(async txdb=>{await lockUser(txdb,op.userId);await assertIdle(txdb,op.userId,op.id);const fresh=await operationFor(op.userId,op.id,txdb);check(fresh&&['PREPARING','APPROVAL_CONFIRMED'].includes(fresh.status),409,'Operation is no longer available for signing.');return budgets(txdb,fresh,context);});
   const nonce=Number(BigInt(await rpc('eth_getTransactionCount',[op.walletAddress,'pending']))),mined=Number(BigInt(await rpc('eth_getTransactionCount',[op.walletAddress,'latest'])));check(Number.isSafeInteger(nonce)&&nonce===mined,409,'This trading wallet has an unresolved network transaction. Check its status first.');
-  if(op.kind!=='WITHDRAW'){check(new Date(op.data.quote.expiresAt)>new Date(),409,'The swap quote expired before signing. No swap was submitted.');check(await latestSettler()===op.data.quote.settler,409,'0x changed its settlement contract. Review a fresh route.');validateSwapData(op.data.quote,op.walletAddress);}
+  if(op.kind!=='WITHDRAW'){check(new Date(op.data.quote.expiresAt)>new Date(),409,'The swap quote expired before signing. No swap was submitted.');await verifySettler(op.data.quote.settler);validateSwapData(op.data.quote,op.walletAddress);}
   const key=openKey(access.wallet);const wire=await signEvmTransaction(key,tx,nonce),txHash=keccak256(wire);
   // Persist the exact signature before the only network send. Unknown results are never resent.
   await transaction(async txdb=>{await lockUser(txdb,op.userId);const fresh=await operationFor(op.userId,op.id,txdb);check(fresh&&['PREPARING','APPROVAL_CONFIRMED'].includes(fresh.status),409,'Operation changed before signing.');await budgets(txdb,fresh,context);await assertIdle(txdb,op.userId,op.id);if(phase==='APPROVAL')await txdb.sql`UPDATE "RHOperation" SET status='SIGNED',"approvalHash"=${txHash},nonce=${nonce},"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${op.id}`;else await txdb.sql`UPDATE "RHOperation" SET status='SIGNED',"txHash"=${txHash},nonce=${nonce},"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE id=${op.id}`;});

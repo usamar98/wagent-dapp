@@ -12,7 +12,7 @@ export const holder = '0x0000000000001ff3684f28c67538d4d072c22734';
 export const registry = '0x00000000000004533fe15556b1e086bb1a72ceae';
 export const holderAbi = new Interface(['function exec(address operator,address token,uint256 amount,address target,bytes data) payable returns(bytes)']);
 export const settlerAbi = new Interface(['function execute((address recipient,address buyToken,uint256 minAmountOut) slippage,bytes[] actions,bytes32 zid) payable returns(bool)']);
-const registryAbi = new Interface(['function ownerOf(uint256) view returns(address)']);
+const registryAbi = new Interface(['function ownerOf(uint256) view returns(address)', 'function prev(uint128) view returns(address)']);
 const uint = z.string().regex(/^\d{1,78}$/).refine(v => BigInt(v) < 2n ** 256n);
 const address = z.string().regex(/^0x[\da-fA-F]{40}$/).transform(evmAddress);
 const insufficientEth = 'Not enough ETH in the paying Robinhood wallet for the amount and gas. Add ETH to that wallet on Robinhood Chain or enter a smaller amount.';
@@ -54,10 +54,31 @@ export function rpcQuantity(value:unknown){check(typeof value==='string'&&/^0x[\
 export async function assetBalance(wallet: string, token = ETH_TOKEN) { return token === ETH_TOKEN ? rpcQuantity(await rpc('eth_getBalance', [evmAddress(wallet), 'latest'])) : BigInt(await tokenCall(token, 'balanceOf', [evmAddress(wallet)])); }
 export type RhTransaction = { to: string; data: string; value: string; gasLimit?: string; gasPrice?: string; chainId: number };
 export type RhQuote = { side: 'BUY' | 'SELL'; token: string; symbol: string; decimals: number; amount: string; sellToken: string; buyToken: string; sellAmount: string; buyAmount: string; minBuyAmount: string; slippageBps: number; providerFee: { amount: string; token: string } | null; feeNotice: string; expiresAt: string; transaction: RhTransaction; settler: string; approval: { token: string; amount: string } | null };
-export async function latestSettler() {
-  const data = await rpc('eth_call', [{ to: registry, data: registryAbi.encodeFunctionData('ownerOf', [2]) }, 'latest']);
-  const settled = evmAddress(registryAbi.decodeFunctionResult('ownerOf', data)[0]);
-  check(settled !== '0x' + '0'.repeat(40), 503, '0x settlement is paused.'); return settled;
+async function registrySettler(method: 'ownerOf' | 'prev', block: string) {
+  const data = await rpc('eth_call', [{ to: registry, data: registryAbi.encodeFunctionData(method, [2]) }, block]);
+  try { return evmAddress(registryAbi.decodeFunctionResult(method, data)[0]); }
+  catch { throw new AppError(502, '0x settlement registry returned an unsupported response. No transaction was submitted.'); }
+}
+export async function verifySettler(candidate: string) {
+  candidate = evmAddress(candidate);
+  // Pin both registry reads to one block. ownerOf must succeed even for the
+  // previous deployment: a paused registry must never fall back to an old route.
+  const block = hex(rpcQuantity(await rpc('eth_blockNumber')));
+  const current = await registrySettler('ownerOf', block);
+  check(current !== '0x' + '0'.repeat(40), 503, '0x settlement is paused.');
+  if (candidate !== current) {
+    // 0x documents API dwell time after a deployment; only the registry's
+    // immediate previous taker-submitted Settler is also genuine, never next.
+    // https://github.com/0xProject/0x-settler#0x-api-dwell-time
+    const previous = await registrySettler('prev', block);
+    check(candidate !== '0x' + '0'.repeat(40) && candidate === previous, 400, 'Swap settlement contract is not a verified active 0x Settler. Review a fresh quote.');
+  }
+  return candidate;
+}
+function quotedSettler(tx: RhTransaction) {
+  if (evmAddress(tx.to) !== holder) return evmAddress(tx.to);
+  try { return evmAddress(holderAbi.decodeFunctionData('exec', tx.data).target); }
+  catch { throw new AppError(400, 'Unsupported 0x allowance-holder transaction.'); }
 }
 // Bind the on-chain minimum, recipient and input authority, not just JSON quote labels.
 // Interfaces and registry: https://github.com/0xProject/0x-settler .
@@ -66,7 +87,7 @@ export function validateSwapData(q: Pick<RhQuote, 'transaction' | 'sellToken' | 
   let data = tx.data;
   if (evmAddress(tx.to) === holder) {
     let args; try { args = holderAbi.decodeFunctionData('exec', data); } catch { throw new AppError(400, 'Unsupported 0x allowance-holder transaction.'); }
-    check(evmAddress(args.operator) === q.settler && evmAddress(args.target) === q.settler, 400, 'Swap operator is not the current verified 0x Settler.');
+    check(evmAddress(args.operator) === q.settler && evmAddress(args.target) === q.settler, 400, 'Swap operator and target must match the verified 0x Settler.');
     check(q.sellToken === ETH_TOKEN ? [ETH_TOKEN, '0x' + '0'.repeat(40)].includes(evmAddress(args.token)) && [0n, BigInt(q.sellAmount)].includes(BigInt(args.amount)) : evmAddress(args.token) === q.sellToken && BigInt(args.amount) === BigInt(q.sellAmount), 400, 'Swap input authorization does not match.');
     check(holderAbi.encodeFunctionData('exec', [...args]).toLowerCase() === data.toLowerCase(), 400, 'Noncanonical swap envelope.'); data = args.data;
   } else check(evmAddress(tx.to) === q.settler && q.sellToken === ETH_TOKEN, 400, 'Unsupported swap entry point.');
@@ -89,8 +110,9 @@ export async function quoteSwap(taker: string, side: 'BUY' | 'SELL', token: stri
   check(!r.fees?.integratorFee || BigInt(r.fees.integratorFee.amount) === 0n, 400, 'Unapproved integration fee.');
   const fee = r.fees?.zeroExFee || null;
   if (fee) { check([sellToken, buyToken].includes(fee.token), 400, 'Unsupported provider fee asset.'); check(BigInt(fee.amount) <= BigInt(fee.token === sellToken ? sellAmount : r.buyAmount) / 100n, 400, '0x fee exceeds the 1% provider fee ceiling.'); }
-  const settler = await latestSettler(), approval = side === 'SELL' && BigInt(await tokenCall(token, 'allowance', [taker, holder])) < BigInt(sellAmount) ? { token, amount: sellAmount } : null;
-  const q: RhQuote = { side, token, symbol: info.symbol, decimals: info.decimals, amount, sellToken, buyToken, sellAmount, buyAmount: r.buyAmount, minBuyAmount: r.minBuyAmount, slippageBps, providerFee: fee, feeNotice: readiness().feeNotice, expiresAt: new Date(Date.now() + 45000).toISOString(), transaction: { ...r.transaction, chainId: ROBINHOOD_CHAIN_ID }, settler, approval };
+  const transaction = { ...r.transaction, chainId: ROBINHOOD_CHAIN_ID };
+  const settler = await verifySettler(quotedSettler(transaction)), approval = side === 'SELL' && BigInt(await tokenCall(token, 'allowance', [taker, holder])) < BigInt(sellAmount) ? { token, amount: sellAmount } : null;
+  const q: RhQuote = { side, token, symbol: info.symbol, decimals: info.decimals, amount, sellToken, buyToken, sellAmount, buyAmount: r.buyAmount, minBuyAmount: r.minBuyAmount, slippageBps, providerFee: fee, feeNotice: readiness().feeNotice, expiresAt: new Date(Date.now() + 45000).toISOString(), transaction, settler, approval };
   validateSwapData(q, taker); return q;
 }
 export async function prepareTransaction(from: string, tx: RhTransaction, maxFee: bigint, simulate = true): Promise<RhTransaction> {
