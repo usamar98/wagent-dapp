@@ -19,4 +19,4 @@ export function fromWei(value: string | bigint, decimals = 18) {
   return `${negative ? '-' : ''}${result}`;
 }
 export type RhToken = { address: string; name: string; symbol: string; decimals?: number; priceUsd: number | null; liquidityUsd: number | null; volume24h: number | null; change24h: number | null; pairCreatedAt: number | null; pairAddress: string; screenerUrl: string };
-export type RhFeed = { tokens: RhToken[]; fetchedAt: string; stale: boolean; source: string; coverage: string };
+export type RhFeed = { tokens: RhToken[]; fetchedAt: string; stale: boolean; source: string; coverage: string; discovery?: { candidates: number; checked: number; available: number; partial: boolean; limit: number } };

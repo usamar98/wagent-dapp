@@ -18,7 +18,8 @@ const address = z.string().regex(/^0x[\da-fA-F]{40}$/).transform(evmAddress);
 const insufficientEth = 'Not enough ETH in the paying Robinhood wallet for the amount and gas. Add ETH to that wallet on Robinhood Chain or enter a smaller amount.';
 export async function fetchBounded(url: string, init: RequestInit = {}, service = 'Provider') {
   try {
-    const response = await fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(12000) });
+    const timeout = AbortSignal.timeout(12000);
+    const response = await fetch(url, { ...init, redirect: 'error', signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout });
     if (!response.ok) throw Error('Unavailable');
     const reader = response.body?.getReader(); if (!reader) throw Error('Missing response');
     const chunks: Uint8Array[] = []; let length = 0;

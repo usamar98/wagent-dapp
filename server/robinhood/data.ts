@@ -5,23 +5,16 @@ import { type RhFeed, type RhToken, isEvmAddress, ETH_TOKEN } from '../../shared
 import { assetBalance, evmAddress, fetchBounded, fromWei, readiness, rpc, tokenInfo } from './providers.js';
 import { walletFor, type RhWallet } from './access.js';
 import { operationList } from './operations.js';
+import { discoverRhTokens, normalizeRhPairs } from './discovery.js';
+export { normalizeRhPairs } from './discovery.js';
 const feeds=new Map<string,{at:number;feed:RhFeed}>(),inflight=new Map<string,Promise<RhFeed>>();
-export function normalizeRhPairs(raw:unknown,addresses?:string[]):RhToken[]{
-  check(Array.isArray(raw)&&raw.length<=3000,502,'Unsupported DEX Screener response.');const selected=new Map<string,RhToken>();
-  for(const p of raw){if(p?.chainId!=='robinhood'||!isEvmAddress(p.baseToken?.address||'')||typeof p.pairAddress!=='string'||!/^0x(?:[\da-fA-F]{40}|[\da-fA-F]{64})$/.test(p.pairAddress))continue;const address=evmAddress(p.baseToken.address);if(addresses&&!addresses.includes(address))continue;
-    const positive=(n:unknown)=>n!==null&&n!==undefined&&Number.isFinite(Number(n))&&Number(n)>=0?Number(n):null,clean=(v:unknown,n:number)=>String(v??'').replace(/[\r\n\x00-\x1f]/g,' ').slice(0,n);
-    const token:RhToken={address,name:clean(p.baseToken.name,160),symbol:clean(p.baseToken.symbol,40),priceUsd:positive(p.priceUsd)===0?null:positive(p.priceUsd),liquidityUsd:positive(p.liquidity?.usd),volume24h:positive(p.volume?.h24),change24h:Number.isFinite(p.priceChange?.h24)?p.priceChange.h24:null,pairCreatedAt:Number.isSafeInteger(p.pairCreatedAt)&&p.pairCreatedAt>0&&p.pairCreatedAt<=Date.now()?p.pairCreatedAt:null,pairAddress:p.pairAddress,screenerUrl:`https://dexscreener.com/robinhood/${p.pairAddress}`};
-    const prior=selected.get(address);if(!prior||(token.liquidityUsd??-1)>(prior.liquidityUsd??-1))selected.set(address,token);
-  }return [...selected.values()];
-}
 export async function rhFeed(query='',tokens?:string[]):Promise<RhFeed>{
   const exact=tokens?.map(evmAddress),key=exact?'tokens:'+exact.sort().join(','):'query:'+query;const cached=feeds.get(key);if(cached&&Date.now()-cached.at<60000)return cached.feed;if(inflight.has(key))return inflight.get(key)!;
-  const task=(async()=>{try{let raw:any,requested=exact;const get=(path:string)=>fetchBounded('https://api.dexscreener.com'+path,{},'DEX Screener');
+  const task=(async()=>{try{let raw:any,requested=exact,discovered:Awaited<ReturnType<typeof discoverRhTokens>>|undefined;const get=(path:string,signal?:AbortSignal)=>fetchBounded('https://api.dexscreener.com'+path,{signal},'DEX Screener');
     if(exact)raw=exact.length?await get('/tokens/v1/robinhood/'+exact.join(',')):[];
     else if(isEvmAddress(query)){requested=[evmAddress(query)];raw=await get('/tokens/v1/robinhood/'+requested[0]);}
-    else if(query){const result=await get('/latest/dex/search?q='+encodeURIComponent(query));raw=result.pairs||[];}
-    else{const profiles=await get('/token-profiles/latest/v1');check(Array.isArray(profiles)&&profiles.length<=2000,502,'Discovery feed is unavailable.');requested=[...new Set<string>(profiles.filter(p=>p.chainId==='robinhood'&&isEvmAddress(p.tokenAddress||'')).map(p=>evmAddress(p.tokenAddress)))].slice(0,30);raw=requested.length?await get('/tokens/v1/robinhood/'+requested.join(',')):[];}
-    const feed:RhFeed={tokens:normalizeRhPairs(raw,requested).sort((a,b)=>(b.liquidityUsd||0)-(a.liquidityUsd||0)).slice(0,60),source:'DEX Screener',fetchedAt:new Date().toISOString(),stale:false,coverage:'Latest indexed Robinhood profiles and pools. First observation is not token launch time; coverage is not exhaustive.'};if(feeds.size>=80)feeds.delete(feeds.keys().next().value!);feeds.set(key,{at:Date.now(),feed});return feed;
+    else discovered=await discoverRhTokens(get,cached?.feed.tokens.map(t=>t.address)||[],query);
+    const feed:RhFeed={tokens:discovered?.tokens||normalizeRhPairs(raw,requested).sort((a,b)=>(b.liquidityUsd||0)-(a.liquidityUsd||0)),...(discovered?{discovery:discovered.discovery}:{}),source:'DEX Screener',fetchedAt:new Date().toISOString(),stale:false,coverage:discovered?'Combined profile, community, promotion and market searches, with indexed pool expansion. Coverage is not exhaustive; pool age is not token launch time.':'Indexed Robinhood pools for the requested token addresses. Pool age is not token launch time.'};if(feeds.size>=80)feeds.delete(feeds.keys().next().value!);feeds.set(key,{at:Date.now(),feed});return feed;
   }catch(e){if(cached&&Date.now()-cached.at<300000)return {...cached.feed,stale:true};throw e;}})().finally(()=>inflight.delete(key));inflight.set(key,task);return task;
 }
 const watchKey=(id:string)=>'robinhood:watchlist:'+id;
