@@ -18,16 +18,16 @@ export type SolanaWallet = {
   };
 };
 
-export const isBinanceWallet = (wallet: Pick<SolanaWallet, 'name'>) => /^binance(?:\s+web3)?\s+wallet$/i.test(wallet.name.trim());
-export const walletLabel = (wallet: Pick<SolanaWallet, 'name'>) => isBinanceWallet(wallet) ? 'Binance Wallet' : wallet.name;
+export const isSupportedSolanaWallet = (wallet: Pick<SolanaWallet, 'name'>) => /^(metamask|phantom)$/i.test(wallet.name.trim());
+export const walletLabel = (wallet: Pick<SolanaWallet, 'name'>) => wallet.name;
 
-// Binance's official Solana integration uses Wallet Standard, not its EVM provider.
+// Historical Solana proofs remain restricted to the same two supported wallets.
 export function availableWallets(purpose: WalletPurpose = 'permissions'): SolanaWallet[] {
   return (getWallets().get() as unknown as SolanaWallet[]).filter(wallet =>
-    wallet.chains.includes(MAINNET) && typeof wallet.features['standard:connect']?.connect === 'function' &&
+    isSupportedSolanaWallet(wallet) && wallet.chains.includes(MAINNET) && typeof wallet.features['standard:connect']?.connect === 'function' &&
     typeof wallet.features['solana:signMessage']?.signMessage === 'function' &&
     (purpose === 'permissions' || typeof wallet.features['solana:signTransaction']?.signTransaction === 'function')
-  ).sort((a, b) => Number(isBinanceWallet(b)) - Number(isBinanceWallet(a)) || a.name.localeCompare(b.name));
+  ).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function observeWallets(update: () => void) {
@@ -53,6 +53,7 @@ function validAccount(account: WalletAccount, feature: string) {
     account.publicKey instanceof Uint8Array && account.publicKey.length === 32 && bs58.encode(account.publicKey) === account.address;
 }
 async function connectAccount(wallet: SolanaWallet, feature: string, address?: string) {
+  if (!isSupportedSolanaWallet(wallet)) throw new Error('Choose MetaMask or Phantom to connect your wallet.');
   // An already-authorized account can sign without repeating the connection handshake.
   // Only reuse the exact expected owner, with the required mainnet feature.
   const existing = address ? wallet.accounts.find(a => a.address === address && validAccount(a, feature)) : undefined;
@@ -71,7 +72,7 @@ function assertCurrentAccount(wallet: SolanaWallet, account: WalletAccount, feat
 }
 async function signExactMessage(wallet: SolanaWallet, account: WalletAccount, message: string) {
   const feature = wallet.features['solana:signMessage'];
-  if (!feature) throw new Error('This wallet cannot sign Solana permissions. Update Binance Wallet, Phantom, or Solflare.');
+  if (!feature) throw new Error('This wallet cannot sign Solana permissions. Update MetaMask or Phantom.');
   const bytes = new TextEncoder().encode(message);
   const results = await feature.signMessage({ account, message: bytes.slice() });
   const signed = results[0];

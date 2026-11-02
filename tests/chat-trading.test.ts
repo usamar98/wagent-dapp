@@ -362,11 +362,11 @@ describe('owner-wallet SOL funding preparation',()=>{
 });
 
 describe('signed WhatsApp trading permission',()=>{
-  it('uses Binance Wallet Standard owner proofs for chat buys, sells, and owner-signed withdrawals',async()=>{
+  it('uses Phantom Wallet Standard owner proofs for chat buys, sells, and owner-signed withdrawals',async()=>{
     const {linkWallet,signWalletMessage}=await import('../src/solana-wallet');
     const publicKey=new Uint8Array(keys.publicKey.export({format:'der',type:'spki'}).subarray(-32));
     const account={address:ownerAddress,publicKey,chains:['solana:mainnet'],features:['solana:signMessage']};
-    const binance={name:'Binance Wallet',chains:['solana:mainnet'],accounts:[account],features:{
+    const phantom={name:'Phantom',chains:['solana:mainnet'],accounts:[account],features:{
       'standard:connect':{connect:async()=>({accounts:[account]})},
       'solana:signMessage':{signMessage:async({message}:{message:Uint8Array})=>[{signedMessage:message.slice(),signature:new Uint8Array(sign(null,message,keys.privateKey))}]},
     }};
@@ -376,14 +376,14 @@ describe('signed WhatsApp trading permission',()=>{
       const result=await client.post(String(input)).set(headers).send(JSON.parse(String(init?.body||'{}')));
       return Response.json(result.body,{status:result.status});
     }));
-    expect((await linkWallet(binance)).address).toBe(ownerAddress);
+    expect((await linkWallet(phantom)).address).toBe(ownerAddress);
     const proof=await post('/challenge',limits);
-    const signature=await signWalletMessage(binance,ownerAddress,proof.body.message);
+    const signature=await signWalletMessage(phantom,ownerAddress,proof.body.message);
     expect((await post('/authorize',{id:proof.body.id,signature})).status).toBe(200);
     expect((await chat(`Buy 0.01 SOL of ${MINT}`)).command.reply).toContain('TRADE CONFIRMED');
     expect((await chat(`Sell 2.5 of ${MINT}`)).command.reply).toContain('TRADE CONFIRMED');expect(p.submissions()).toBe(2);
     const withdrawal=await post('/withdrawal/challenge',{mint:SOL,amount:'0.01'});
-    const ownerSignature=await signWalletMessage(binance,ownerAddress,withdrawal.body.message);
+    const ownerSignature=await signWalletMessage(phantom,ownerAddress,withdrawal.body.message);
     expect((await post('/withdrawal',{id:withdrawal.body.id,signature:ownerSignature})).status).toBe(200);expect(p.withdrawals()).toBe(1);
     expect((await client.get('/api/solana/chat-trading')).body.permission.active).toBe(false);
   });

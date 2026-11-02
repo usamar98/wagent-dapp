@@ -20,7 +20,7 @@ A Robinhood Chain agent workspace connected to the user's personal WhatsApp agen
 
 Keep DATABASE_URL, the **original CREDENTIAL_ENCRYPTION_KEY**, APP_URL and DEMO_MODE=false. Add server-only **ROBINHOOD_RPC_URL** (free-plan Alchemy Robinhood mainnet HTTPS endpoint) and **ZEROX_API_KEY** (0x key under your chosen no-subscription plan), then redeploy. See [complete setup](docs/ROBINHOOD.md) and robinhood.env.example.
 
-Missing credentials show Provider setup required and block live swaps. DEX Screener requires no key. No AI, Coinbase, DEXTools, Birdeye, Robinhood brokerage or Binance Exchange API key is needed. Each user supplies their own personal WhatsApp agent key in Connections.
+Missing credentials show Provider setup required and block live swaps. DEX Screener requires no key. No AI, Coinbase, DEXTools, Birdeye, brokerage or exchange API key is needed. Each user supplies their own personal WhatsApp agent key in Connections.
 
 No paid subscription, gas sponsor or automatic provider upgrade is configured. Free access has quotas. ETH gas, pool costs and applicable 0x fees are paid by users; 0x may collect positive trade surplus.
 

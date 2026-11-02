@@ -22,8 +22,8 @@ The app does not purchase subscriptions, enable paid billing, sponsor gas or upg
 ## Setup
 
 1. Sign in with the existing EVM workspace identity. Select a privately owned agent in Connections and pair the creator's personal WhatsApp agent. Existing pairings remain available.
-2. Open WhatsApp trading and choose MetaMask, Binance Wallet or a compatible EVM wallet. Verify the original owner by signing the displayed custody/ownership message. This creates a new encrypted EVM trading key but grants no spending.
-3. Review a native-ETH transfer from that owner or copy the dedicated address for an external deposit. ETH must be on Robinhood Chain. Binance Wallet is distinct from Binance Exchange, and Robinhood Chain is independent of brokerage balances.
+2. Open WhatsApp trading and choose MetaMask or Phantom. Verify the original owner by signing the displayed custody/ownership message. This creates a new encrypted EVM trading key but grants no spending.
+3. Review a native-ETH transfer from that owner or copy the dedicated address for an external deposit. ETH must be on Robinhood Chain. Exchange balances and Robinhood brokerage balances are separate from connected EVM wallets.
 4. Review and sign a new trading permission. Choose Any supported Robinhood token or selected ERC-20 addresses, total per-operation and UTC daily ETH budgets, gas reserve, slippage and expiry.
 5. Send Buy 0.001 ETH of <0x token address> or Sell 100 of <0x token address> in the paired owner chat. An any-token grant permits later exact addresses without editing a list. Funds and executable supported routes are still required.
 

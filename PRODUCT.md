@@ -4,7 +4,7 @@
 product
 
 ## Users and purpose
-People create private Robinhood Chain token agents, pair their own WhatsApp agent, and use an original EVM owner account from MetaMask, Binance Wallet or Phantom. A distinct server-managed trading wallet holds only explicitly deposited native ETH and ERC-20 tokens on chain 4663. An exchange balance and an old Solana account are separate assets and authority.
+People create private Robinhood Chain token agents, pair their own WhatsApp agent, and use an original EVM owner account from MetaMask or Phantom. A distinct server-managed trading wallet holds only explicitly deposited native ETH and ERC-20 tokens on chain 4663. An exchange balance and an old Solana account are separate assets and authority.
 
 ## Available features
 Private agents; WhatsApp ownership pairing; DEX Screener discovery, watchlists, price/liquidity alerts; Alchemy on-chain balances and portfolio; 0x exact-input buying and selling; fresh owner-signed website trades; opt-in WhatsApp trading with per-operation and UTC daily budgets, gas cap, token scope, expiry and revoke; independent native ETH withdrawal permission with a fixed original owner recipient and a two-minute confirmation code; owner-signed ETH/ERC-20 recovery; read-only history and confirmation checks.

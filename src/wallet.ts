@@ -9,9 +9,9 @@ export interface WalletProvider {
   on?(event:string,listener:(value:any)=>void):void;
   removeListener?(event:string,listener:(value:any)=>void):void;
 }
-export type AccountWallet = 'metamask' | 'binance' | 'phantom';
+export type AccountWallet = 'metamask' | 'phantom';
 const accountWalletKey='wagent:account-wallet';
-declare global {interface Window {ethereum?:WalletProvider;binancew3w?:{ethereum?:WalletProvider};phantom?:{ethereum?:WalletProvider}}}
+declare global {interface Window {ethereum?:WalletProvider;phantom?:{ethereum?:WalletProvider}}}
 export function shortWallet(address:string){return `${address.slice(0,6)}…${address.slice(-4)}`}
 export async function findMetaMask():Promise<WalletProvider|null>{
   // EIP-6963 avoids accidentally selecting another injected wallet.
@@ -27,18 +27,15 @@ export async function findMetaMask():Promise<WalletProvider|null>{
 export async function findAccountWallet(kind:AccountWallet):Promise<WalletProvider|null>{
   if(kind==='metamask')return findMetaMask();
   if(kind==='phantom'){
-    const scoped=window.phantom?.ethereum;if(typeof scoped?.request==='function')return scoped;
-    const injected=window.ethereum;return injected?.providers?.find(p=>p.isPhantom)||(injected?.isPhantom?injected:null);
+    const scoped=window.phantom?.ethereum;if(typeof scoped?.request==='function'&&!scoped.isBinance)return scoped;
+    const injected=window.ethereum;return injected?.providers?.find(p=>p.isPhantom&&!p.isBinance)||(injected?.isPhantom&&!injected.isBinance?injected:null);
   }
-  // Binance documents this namespace for both its extension and DApp browser.
-  const scoped=window.binancew3w?.ethereum;
-  if(typeof scoped?.request==='function')return scoped;
-  const injected=window.ethereum;
-  return injected?.providers?.find(p=>p.isBinance)||(injected?.isBinance?injected:null);
+  return null;
 }
-export function signedInWalletKind():AccountWallet{try{const kind=sessionStorage.getItem(accountWalletKey);return kind==='binance'||kind==='phantom'?kind:'metamask';}catch{return 'metamask';}}
+export function signedInWalletKind():AccountWallet{try{return sessionStorage.getItem(accountWalletKey)==='phantom'?'phantom':'metamask';}catch{return 'metamask';}}
 export async function signInWithWallet(kind:AccountWallet){
-  const label={binance:'Binance Wallet',phantom:'Phantom',metamask:'MetaMask'}[kind];
+  if(kind!=='metamask'&&kind!=='phantom')throw new Error('Choose MetaMask or Phantom to connect your wallet.');
+  const label={phantom:'Phantom',metamask:'MetaMask'}[kind];
   const provider=await findAccountWallet(kind);if(!provider)throw new Error(`${label} was not detected. ${kind!=='metamask'?`Open this site in ${label}’s DApp browser or install its wallet extension.`:'Open this site in a browser with the MetaMask extension installed.'}`);
   const accounts=await provider.request({method:'eth_requestAccounts'});const address=accounts?.[0];
   if(typeof address!=='string'||!/^0x[0-9a-fA-F]{40}$/.test(address))throw new Error(`Select an EVM account in ${label} to sign in. Verify your EVM owner on Robinhood Chain for trading.`);

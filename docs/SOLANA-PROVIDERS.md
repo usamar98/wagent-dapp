@@ -46,7 +46,7 @@ Official references: [Jupiter Swap API](https://developers.jup.ag/docs/swap/orde
 
 The workspace sign-in address (`0x…`) and the Solana trading address are separate. Current MetaMask versions support Solana; use the address dropdown below the account name to find the Solana address, rather than adding an EVM custom network. See [MetaMask's Solana guide](https://support.metamask.io/configure/networks/navigating-solana/).
 
-Binance Wallet is detected through Solana Wallet Standard and appears in the app's Wallet app selector when available. Its setup link remains visible even when another wallet is detected. Open the site inside Binance Wallet's DApp browser or use its compatible extension. This does not connect the Binance Exchange balance or require a Binance Exchange API key. See [Binance Wallet extension setup](https://www.binance.com/en/support/faq/detail/99532b46a51b454a9fd2e061a99619bd).
+Only MetaMask and Phantom are offered by the application. Historical Solana proofs use their Solana Wallet Standard features; EVM workspace identity and Solana ownership are separate.
 
 Manual Buy & sell spends from the linked owner Solana wallet shown on that page. WhatsApp trading spends only from the separate funded trading wallet after signed permission. A balance in one does not fund the other. Native SOL on Solana is required for the input of a buy and for applicable network fees; an EVM balance does not cover Solana fees.
 

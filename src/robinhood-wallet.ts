@@ -1,7 +1,7 @@
 import { findAccountWallet, type AccountWallet, type WalletProvider } from './wallet';
 import { ROBINHOOD_CHAIN_HEX, ROBINHOOD_CHAIN_ID, RH_EXPLORER, evmAddress } from '../shared/robinhood';
 export async function rhProvider(kind:AccountWallet,expected?:string):Promise<{provider:WalletProvider;address:string}>{
-  const provider=await findAccountWallet(kind);if(!provider)throw Error(`${kind==='binance'?'Binance Wallet':kind==='phantom'?'Phantom':'MetaMask'} was not detected. Open the site in its DApp browser or compatible extension.`);
+  const provider=await findAccountWallet(kind);if(!provider)throw Error(`${kind==='phantom'?'Phantom':'MetaMask'} was not detected. Open the site in its DApp browser or compatible extension.`);
   let accounts=await provider.request({method:'eth_accounts'});if(!accounts?.length)accounts=await provider.request({method:'eth_requestAccounts'});const address=evmAddress(accounts?.[0]||'');if(expected&&address!==evmAddress(expected))throw Error('Select the original owner account in this wallet. No other account will be used.');
   const chain=await provider.request({method:'eth_chainId'});if(Number(chain)!==ROBINHOOD_CHAIN_ID){try{await provider.request({method:'wallet_switchEthereumChain',params:[{chainId:ROBINHOOD_CHAIN_HEX}]});}catch(e:any){if(e?.code!==4902)throw e;await provider.request({method:'wallet_addEthereumChain',params:[{chainId:ROBINHOOD_CHAIN_HEX,chainName:'Robinhood Chain',nativeCurrency:{name:'Ether',symbol:'ETH',decimals:18},rpcUrls:['https://rpc.mainnet.chain.robinhood.com'],blockExplorerUrls:[RH_EXPLORER]}]});await provider.request({method:'wallet_switchEthereumChain',params:[{chainId:ROBINHOOD_CHAIN_HEX}]});}}
   await assertRhAccount(provider,address);return {provider,address};
