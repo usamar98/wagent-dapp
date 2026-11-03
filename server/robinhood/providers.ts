@@ -32,7 +32,20 @@ async function rawRpc(method: string, params: unknown[]) {
   check(endpoint, 503, 'Robinhood setup required: add ROBINHOOD_RPC_URL from your free Alchemy Robinhood mainnet application.');
   let parsed:URL;try{parsed=new URL(endpoint);}catch{throw new AppError(503,'Configure a valid HTTPS Robinhood RPC endpoint.');}check(parsed.protocol === 'https:' && !parsed.username && !parsed.password, 503, 'Configure an HTTPS Robinhood RPC endpoint.');
   const raw = await fetchBounded(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }, 'Robinhood RPC');
-  if (['eth_estimateGas','eth_call'].includes(method) && /insufficient funds for gas(?:\s|\*|$)|insufficient funds for transfer|^insufficient funds$/i.test(String(raw?.error?.message || ''))) throw new AppError(400, insufficientEth);
+  if (['eth_estimateGas','eth_call'].includes(method) && raw?.error) {
+    // Provider messages may contain private endpoint details. Classify known
+    // failures without copying untrusted RPC text into chat or calling a revert
+    // an RPC outage. A rejected simulation must never reach signing.
+    const message=String(raw.error.message||'');
+    if (/insufficient funds for gas(?:\s|\*|$)|insufficient funds for transfer|^insufficient funds$/i.test(message)) throw new AppError(400, insufficientEth);
+    if (/max fee per gas less than block base fee|fee cap less than block base fee/i.test(message)) throw new AppError(503, 'The network gas price changed during preparation. Request a fresh quote. No transaction was submitted.');
+    if (/gas required exceeds allowance|gas cap|out of gas/i.test(message)) throw new AppError(400, 'Gas simulation could not fit within the available balance and approved gas cap. Review your gas limit and ETH balance. No transaction was submitted.');
+    if (raw.error.code===3 || /execution reverted/i.test(message)) {
+      const data=typeof raw.error.data==='string'?raw.error.data:'';
+      if (/^0xcd21db4f[\da-f]{64}$/i.test(data)) throw new AppError(400, 'The swap route expired on-chain. Request a fresh quote. No transaction was submitted.');
+      throw new AppError(400, 'Transaction simulation reverted on-chain. The token or route cannot execute at the current price and limits. No transaction was submitted.');
+    }
+  }
   check(raw && !raw.error && Object.hasOwn(raw, 'result'), 502, `Robinhood RPC could not complete ${method}. No transaction was retried.`); return raw.result;
 }
 export async function rpc(method: string, params: unknown[] = []): Promise<any> {
@@ -103,8 +116,10 @@ export async function quoteSwap(taker: string, side: 'BUY' | 'SELL', token: stri
   const sellAmount = weiAmount(amount, side === 'BUY' ? 18 : info.decimals).toString();
   const params = new URLSearchParams({ chainId: String(ROBINHOOD_CHAIN_ID), sellToken, buyToken, sellAmount, taker, recipient: taker, slippageBps: String(slippageBps) });
   const raw = await fetchBounded('https://api.0x.org/swap/allowance-holder/quote?' + params, { headers: { '0x-api-key': process.env.ZEROX_API_KEY!, '0x-version': 'v2', Accept: 'application/json' } }, '0x');
+  check(raw?.liquidityAvailable!==false,400,'No executable 0x route is available for this token and amount right now. A DEX Screener listing does not guarantee tradable liquidity. No transaction was submitted.');
   const parsed = z.object({ liquidityAvailable: z.literal(true), sellToken: address, buyToken: address, sellAmount: uint, buyAmount: uint, minBuyAmount: uint, transaction: z.object({ to: address, data: z.string().regex(/^0x[\da-fA-F]+$/).max(150000), value: uint }), issues: z.object({ allowance: z.object({ spender: address }).nullable().optional(), simulationIncomplete: z.boolean().optional() }).passthrough().optional(), fees: z.object({ zeroExFee: z.object({ amount: uint, token: address }).nullable().optional(), integratorFee: z.object({ amount: uint }).nullable().optional() }).passthrough().optional() }).safeParse(raw);
-  check(parsed.success, 400, '0x cannot prepare this trade. Check liquidity, token support and the paying wallet balance.'); const r = parsed.data;
+  check(parsed.success, 502, '0x returned an incomplete or unsupported quote. No transaction was submitted.'); const r = parsed.data;
+  check(!raw.issues?.balance,400,side==='BUY'?insufficientEth:'Not enough tokens in the paying wallet for this sale. No transaction was submitted.');
   check(r.sellToken === sellToken && r.buyToken === buyToken && r.sellAmount === sellAmount && BigInt(r.buyAmount) > 0n && BigInt(r.minBuyAmount) > 0n && BigInt(r.minBuyAmount) <= BigInt(r.buyAmount) && BigInt(r.minBuyAmount) >= BigInt(r.buyAmount) * BigInt(10000 - slippageBps) / 10000n, 400, '0x quote differs from the requested amount or slippage.');
   check(!r.issues?.allowance || r.issues.allowance.spender === holder, 400, 'Unsupported token allowance target.');
   check(!r.fees?.integratorFee || BigInt(r.fees.integratorFee.amount) === 0n, 400, 'Unapproved integration fee.');
@@ -120,7 +135,14 @@ export async function prepareTransaction(from: string, tx: RhTransaction, maxFee
   const request = { from: evmAddress(from), to: evmAddress(tx.to), data: tx.data, value: hex(BigInt(tx.value)) };
   const balance = await assetBalance(from);
   check(balance > BigInt(tx.value), 400, insufficientEth);
-  const gasPrice = BigInt(await rpc('eth_gasPrice')) * 125n / 100n, gasLimit = BigInt(await rpc('eth_estimateGas', [request])) * 125n / 100n;
+  const gasPrice = rpcQuantity(await rpc('eth_gasPrice')) * 125n / 100n;
+  check(gasPrice>0n,502,'RPC returned an invalid gas price. No transaction was submitted.');
+  // Nodes can otherwise simulate with a block-sized gas allowance or a default
+  // gas price that the wallet cannot fund. Use the actual buffered price and a
+  // ceiling bounded by both signed gas consent and the available ETH.
+  const gasCeiling=[maxFee/gasPrice,(balance-BigInt(tx.value))/gasPrice,9_999_999n].reduce((a,b)=>a<b?a:b);
+  check(gasCeiling>=21_000n,400,'Not enough approved gas budget or ETH to prepare this transaction. Review the gas cap and paying wallet balance. No transaction was submitted.');
+  const gasLimit = rpcQuantity(await rpc('eth_estimateGas', [{...request,gas:hex(gasCeiling),gasPrice:hex(gasPrice)}])) * 125n / 100n;
   check(gasLimit > 0n && gasLimit < 10_000_000n && gasPrice > 0n && gasLimit * gasPrice <= maxFee, 400, 'Estimated gas exceeds the approved fee cap.');
   check(balance >= BigInt(tx.value) + gasLimit * gasPrice, 400, insufficientEth);
   if (simulate) {const result=await rpc('eth_call', [{ ...request, gas: hex(gasLimit), gasPrice: hex(gasPrice) }, 'pending']);for(const method of ['approve','transfer'])if(tx.data.startsWith(erc20.getFunction(method)!.selector)&&result!=='0x'){let ok=false;try{ok=erc20.decodeFunctionResult(method,result)[0]===true;}catch{/* Unknown token return data fails closed. */}check(ok,400,'Token simulation did not confirm a successful '+method+'.');}}

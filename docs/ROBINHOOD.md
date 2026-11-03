@@ -37,6 +37,8 @@ Amount plus reserved gas counts against both signed budgets. Daily usage continu
 
 0x AllowanceHolder transactions are checked against the current on-chain Settler registry. Executable calldata must protect the intended recipient, input asset/amount, output asset and minimum receive. Unsupported layouts fail closed. Only the exact input amount may be approved to the verified AllowanceHolder, never unlimited approval or approval to the Settler itself.
 
+Gas estimation uses an explicit buffered gas price and a gas ceiling bounded by the approved fee cap and the paying wallet's available ETH. Estimation and the final simulation must both succeed before signing. Missing 0x liquidity, insufficient balances, on-chain reverts and changed network gas prices produce distinct messages; none triggers an automatic financial retry. A token appearing in DEX Screener is discovery data, not proof that 0x can buy or sell it. When no executable route exists, the app cannot force a swap.
+
 A sale may require a token approval and then a swap. Both must fit the gas reserve. If approval/submission is uncertain, processing stops at the saved hash. Check commands do not send or advance financial actions. An approval-only result explicitly says no swap was submitted; a fresh order is required after checking the result.
 
 Hashes and nonces are persisted before a single network send. Unknown submissions retain reservations and are never blindly resent. Review links are NOT SUBMITTED and explain absent, expired or revoked permissions. Renewing access does not replay old requests. Status replies identify the exact request and timestamp.
