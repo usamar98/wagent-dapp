@@ -41,7 +41,13 @@ async function budgets(tx:Tx,op:RhOperation,context?:ChatContext) {
     check(await dailyUsage(tx,op.userId,p.kind,op.id,channel.slot)+budget<=BigInt(p.dailyLimitWei),409,'This agent’s UTC daily spending budget would be exceeded.');
     const combined=await walletBudgetFor(op.userId,p.kind,tx);
     if(combined){validateWalletBudget(combined,access.wallet);check(budget<=BigInt(combined.perLimitWei),409,'The combined wallet per-operation budget would be exceeded.');check(await dailyUsage(tx,op.userId,p.kind,op.id)+budget<=BigInt(combined.dailyLimitWei),409,'The combined wallet UTC daily spending budget would be exceeded.');}
-    else {check(channel.slot===1,409,'Approve combined wallet limits before enabling a second agent.');check(await dailyUsage(tx,op.userId,p.kind,op.id)+budget<=BigInt(p.dailyLimitWei),409,'The UTC daily spending budget would be exceeded.');}
+    else {
+      // Only genuinely pre-upgrade single-agent consent can use the legacy
+      // ceiling. A missing shared-policy row must not undo a signed shared cap.
+      const sharedHistory=await tx.sql`SELECT id FROM "RHPermission" WHERE "userId"=${op.userId} AND kind=${p.kind} AND position('Combined per-operation total budget: ' in message)>0 LIMIT 1`;
+      check(channel.slot===1&&!sharedHistory.length,409,'Shared wallet limits are missing. Review and sign combined limits before trading or withdrawing.');
+      check(await dailyUsage(tx,op.userId,p.kind,op.id)+budget<=BigInt(p.dailyLimitWei),409,'The UTC daily spending budget would be exceeded.');
+    }
     if(op.kind!=='WITHDRAW')check(p.tokenScope==='ANY_ROBINHOOD'||p.tokens.includes(op.tokenAddress),403,'This token is outside the signed token scope.');
   }
   return {...access,fee,budget};
