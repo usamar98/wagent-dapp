@@ -148,16 +148,25 @@ personalWhatsAppRouter.post('/', async (req, res) => {
   const input = z.object({slot:channelSlot,label: z.string().trim().min(2).max(60), apiKey: z.string().trim().min(20).max(4096).regex(/^\S+$/), consent: z.literal(true) }).strict().parse(req.body);
   check(input.slot===1||robinhoodRelease(),409,'Two connections are available for Robinhood Chain wallets.');
   const code = randomBytes(6).toString('hex').toUpperCase();
-  await transaction(async tx => {
+  const result=await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
     const data = { appUrl:websiteOrigin(env.appUrl),label: input.label, encryptedToken: encrypt(input.apiKey), tokenFingerprint: hash(input.apiKey), ownerId: null, agentId: null, pairingHash: hash(code), pairingExpiresAt: new Date(Date.now() + 10 * 60000), enabled: true, offset: '0', leaseToken: null, leaseUntil: null, nextPollAt: new Date(), lastError: null, lastPollAt: null, lastMessageAt: null, createdAt: new Date(), consentAt: new Date() };
-    const duplicate=await tx.personalAgentChannel.findFirst({where:{tokenFingerprint:hash(input.apiKey)}});check(!duplicate||(duplicate.userId===userId&&duplicate.slot===input.slot),409,'This personal agent key is already connected. Use a different agent key for the second connection.');
+    const duplicate=await tx.personalAgentChannel.findFirst({where:{tokenFingerprint:hash(input.apiKey)}});
+    check(!duplicate||duplicate.userId===userId,409,'This personal agent key is already connected to another workspace.');
+    check(!duplicate||duplicate.enabled,409,'This saved connection is disabled. Disconnect it before connecting it again.');
+    if(duplicate?.enabled){
+      // Opening the same wallet on another device is a restore, not key rotation.
+      // Keep identity, cursor, leases, pending replies, labels and permission state.
+      if(!duplicate.ownerId)await tx.personalAgentChannel.update({where:{id:duplicate.id},data:{pairingHash:hash(code),pairingExpiresAt:new Date(Date.now()+600000)}});
+      return {reused:true,slot:duplicate.slot,paired:!!duplicate.ownerId,pairingCommand:duplicate.ownerId?null:`LINK ${code}`,expiresInSeconds:duplicate.ownerId?0:600};
+    }
     const previous = await tx.personalAgentChannel.findUnique({ where: {slot:input.slot, userId } });
     if(robinhoodRelease()){if(previous)await revokeRh(tx,userId,'ALL','WhatsApp connection key replaced.',previous.id);}else{await revokeTrading(tx,userId,'Replacing WhatsApp revoked trading.');await revokeWithdrawals(tx,userId,'Replacing WhatsApp revoked withdrawals.');}
     if (previous) await tx.agentCommand.updateMany({ where: { channelId: previous.id, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'CANCELLED' } });
     await tx.personalAgentChannel.upsert({ where: {slot:input.slot, userId }, create: {slot:input.slot,userId, ...data }, update: data });
+    return {reused:false,slot:input.slot,paired:false,pairingCommand:`LINK ${code}`,expiresInSeconds:600};
   });
-  res.status(201).json({ pairingCommand: `LINK ${code}`, expiresInSeconds: 600 });
+  res.status(result.reused?200:201).json(result);
 });
 personalWhatsAppRouter.post('/sync', async (req, res) => {const {slot}=slotBody.parse(req.body);const channel=await db.personalAgentChannel.findUnique({where:{userId:req.user!.id,slot}});check(channel,409,'Save this connection first.');res.json(await syncPersonalAgent(req.user!.id,channel.id));});
 personalWhatsAppRouter.post('/pairing', async (req, res) => {

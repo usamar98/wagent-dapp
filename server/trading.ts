@@ -207,10 +207,11 @@ export const tradingRouter = Router();
 tradingRouter.use(auth);
 tradingRouter.get('/', async (req, res) => res.json(await getWorkspace(req.user!.id)));
 tradingRouter.post('/settings', async (req, res) => {
-  const input = z.object({ versionId: z.string().min(1).optional(), maxOrderCents: z.number().int().min(100).max(1000000).optional(), maxDailyCents: z.number().int().min(100).max(10000000).optional() }).strict().parse(req.body);
+  const input = z.object({ versionId: z.string().min(1).optional(),expectedActiveInstanceId:z.string().min(1).nullable().optional(),maxOrderCents: z.number().int().min(100).max(1000000).optional(), maxDailyCents: z.number().int().min(100).max(10000000).optional() }).strict().parse(req.body);
   const result = await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
     const workspace = await tx.tradingWorkspace.upsert({ where: { userId }, create: { userId }, update: {} });
+    check(input.expectedActiveInstanceId===undefined||input.expectedActiveInstanceId===workspace.activeInstanceId,409,'The shared agent selection changed on another device. Refresh Connections before changing it.');
     let activeInstanceId = workspace.activeInstanceId;
     if (input.versionId) {
       await canUseVersion(tx, userId, input.versionId);

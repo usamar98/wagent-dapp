@@ -5,7 +5,7 @@ import { db, transaction, lockUser } from '../db.js';
 import { auth, check, hash } from '../security.js';
 import { rateLimit } from 'express-rate-limit';
 import { rateLimitKey } from '../rate-limit.js';
-import { assetBalance, ETH_TOKEN, erc20, evmAddress, fromWei, hex, holder, prepareTransaction, quoteSwap, readiness, ROBINHOOD_CHAIN_ID, rpc, tokenInfo, weiAmount } from './providers.js';
+import { assetBalance, ETH_TOKEN, erc20, evmAddress, fromWei, hex, holder, prepareTransaction, quoteSwap, readiness, ROBINHOOD_CHAIN_ID, rpc, rpcQuantity, tokenInfo, weiAmount } from './providers.js';
 import { consumeChallenge, createChallenge, createKey, dailyUsage, freshSession, latestPermission, paired, permissionView, revokeRh, selectedAgent, walletFor,walletBudgetFor,walletBudgetView,type RhPermission } from './access.js';
 import { executeOperation, operationFor, operationList, operationPresentation, operationReply, queueOperation, reconcileOperation, reviewHash } from './operations.js';
 import { alertState, portfolio, rhFeed, setWatched, watchlist } from './data.js';
@@ -31,8 +31,15 @@ rhRouter.post('/owner/review',async(req,res)=>{
   res.json(await transaction(async tx=>{const userId=await freshSession(tx,req),existing=await walletFor(userId,tx);check(!existing||existing.ownerAddress===input.address,409,'Use the original Robinhood owner account.');return createChallenge(tx,req,'OWNER',input.address,{custody:true},'I verify this original owner and request a separate Robinhood trading wallet. Wagent holds its encrypted signing key. Limits are enforced by the application, not an on-chain spending contract. This message moves no funds and grants no trading or withdrawal access.');}));
 });
 rhRouter.post('/owner/verify',async(req,res)=>{const input=proof.parse(req.body);res.json(await transaction(async tx=>{const review=await consumeChallenge(tx,req,input.id,input.signature,'OWNER'),userId=req.user!.id,existing=await walletFor(userId,tx);check(!existing||existing.ownerAddress===review.address,409,'Original owner cannot be replaced.');if(!existing){const key=createKey(userId);await tx.sql`INSERT INTO "RHWallet" ("userId",address,"ownerAddress","encryptedSecret") VALUES (${userId},${key.address},${review.address},${key.encryptedSecret})`;}return {ok:true};}));});
+async function ownerPending(address:string){const [pending,mined]=await Promise.all([rpc('eth_getTransactionCount',[address,'pending']),rpc('eth_getTransactionCount',[address,'latest'])]);const p=rpcQuantity(pending),m=rpcQuantity(mined);return p>m?(p-m).toString():'0';}
+rhRouter.get('/funding/status',async(req,res)=>{
+  const wallet=await walletFor(req.user!.id);check(wallet,409,'Verify your original owner first.');
+  const [owner,trading,pending]=await Promise.all([assetBalance(wallet.ownerAddress),assetBalance(wallet.address),ownerPending(wallet.ownerAddress)]);
+  res.json({chainId:ROBINHOOD_CHAIN_ID,ownerAddress:wallet.ownerAddress,tradingAddress:wallet.address,ownerEth:fromWei(owner),tradingEth:fromWei(trading),pendingTransactions:pending,at:new Date().toISOString()});
+});
 rhRouter.post('/funding/review',async(req,res)=>{
   const input=z.object({amount}).strict().parse(req.body),wallet=await walletFor(req.user!.id);check(wallet,409,'Verify your original owner first.');const raw=weiAmount(input.amount),cap=weiAmount('0.001');
+  check(await ownerPending(wallet.ownerAddress)==='0',409,'Your original owner wallet has an unresolved Robinhood Chain transaction. Check wallet Activity and wait for confirmation before another deposit. No new wallet request was opened.');
   const tx=await prepareTransaction(wallet.ownerAddress,{to:wallet.address,value:raw.toString(),data:'0x',chainId:ROBINHOOD_CHAIN_ID},cap);
   res.json({transaction:{from:wallet.ownerAddress,to:tx.to,value:hex(raw),data:'0x',gas:hex(BigInt(tx.gasLimit!)),gasPrice:hex(BigInt(tx.gasPrice!)),chainId:hex(ROBINHOOD_CHAIN_ID)},amount:input.amount,fee:fromWei(BigInt(tx.gasLimit!)*BigInt(tx.gasPrice!)),expiresAt:new Date(Date.now()+60000).toISOString()});
 });
