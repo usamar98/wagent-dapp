@@ -31,6 +31,16 @@ Private old agents may be selected, but their saved Solana addresses are not Rob
 
 Wagent holds the dedicated signing key encrypted. Limits are application-enforced, not an on-chain spending contract. A service or encryption-key compromise could put deposits at risk. The main owner key is never requested. Personal agent chats are not end-to-end encrypted.
 
+## Two WhatsApp connections, one trading wallet
+
+Connections supports two slots, each with its own encrypted personal-agent key, pairing code, message cursor, fenced polling lease and creator chat. The existing connection remains Agent 1. Both use the same original owner and existing RHWallet; adding Agent 2 never creates a new funded wallet or copies Agent 1's permission. The saved platform agent configuration is shared, and changing it invalidates both trading approvals.
+
+In WhatsApp trading, select Agent 1 or Agent 2 and review a separate owner-signed approval. Each review identifies the connection, chat and slot, individual per-operation and UTC daily limits, and combined wallet per-operation and UTC daily ceilings. Signing updates the displayed combined ceiling for both connections while granting execution access only to the selected connection. Trade and withdrawal budgets remain separate. A stale review cannot overwrite a more recent shared-budget approval. The combined ceiling is not execution authority and remains in force after revocation or disconnection. Existing Agent 1 consent remains bounded by its original daily budget until a new shared ceiling is signed.
+
+Each order checks the selected agent's individual limits and the wallet's combined limits, including reserved gas, under the existing user lock before signing and sending. Usage does not reset on approval renewal, key replacement, disconnect or reconnect in the same slot. One unresolved wallet operation blocks another financial operation across both chats. Upstream message IDs are scoped by connection, with compatibility checks for previously recorded IDs. Activity and receipts identify the requesting connection, and Check trade only follows requests from that chat.
+
+Agent 2 withdrawals start off. Enabling them requires separate owner-signed withdrawal consent. The fixed recipient remains the original owner, and confirmation codes, cancellation and status are scoped to the requesting connection. A code from Agent 1 cannot be used by Agent 2. Revoke trading, Revoke withdrawals and Revoke access affect the current chat; Stop all or Pause revokes both connections and activates the emergency stop. Website controls allow individual revocation or Revoke all access. Disconnecting or replacing one key revokes only that connection. Alert delivery currently uses Agent 1.
+
 ## Transaction safeguards
 
 Amount plus reserved gas counts against both signed budgets. Daily usage continues across grant replacement. The app binds original owner, dedicated wallet, agent, paired chat, connection fingerprint, network, scope and expiry.

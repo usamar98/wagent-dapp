@@ -46,7 +46,7 @@ export async function permissionSession(tx: Tx, req: Request, allowStopped = fal
 export async function tradingContext(tx: Tx, userId: string) {
   const [user, owner, channel, workspace, wallet] = await Promise.all([
     tx.user.findUnique({ where: { id: userId } }), tx.solanaWallet.findUnique({ where: { userId } }),
-    tx.personalAgentChannel.findUnique({ where: { userId } }), tx.tradingWorkspace.findUnique({ where: { userId } }), tx.solanaTradingWallet.findUnique({ where: { userId } }),
+    tx.personalAgentChannel.findUnique({ where: {slot:1, userId } }), tx.tradingWorkspace.findUnique({ where: { userId } }), tx.solanaTradingWallet.findUnique({ where: { userId } }),
   ]);
   check(user && !user.disabled && !user.emergencyStop, 409, 'Trading is stopped or the account is unavailable.');
   check(owner, 409, 'Link your own Solana wallet in Buy & sell first.');
@@ -88,7 +88,7 @@ solanaPermissionsRouter.get('/chat-trading', async (req,res) => {
     db.solanaTradePermission.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } }),
     db.solanaChatTrade.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 30 }),
     db.solanaWalletWithdrawal.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 10 }),
-    db.personalAgentChannel.findUnique({ where: { userId }, select: { id: true, appUrl: true, ownerId: true, enabled: true, tokenFingerprint: true, createdAt: true } }),
+    db.personalAgentChannel.findUnique({ where: {slot:1, userId }, select: { id: true, appUrl: true, ownerId: true, enabled: true, tokenFingerprint: true, createdAt: true } }),
     db.tradingWorkspace.findUnique({ where: { userId } }), db.solanaWallet.findUnique({ where: { userId } }), db.setting.findUnique({ where: { key: 'workerHeartbeat' } }),
     db.agentVersion.findMany({ where: { agent: { creatorId: userId } }, include: { agent: true }, orderBy: { createdAt: 'desc' }, take: 100 }),
   ]);

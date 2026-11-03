@@ -8,7 +8,7 @@ import { ROBINHOOD_CHAIN_ID, evmAddress, fromWei } from './providers.js';
 import {weiAmount} from '../../shared/robinhood.js';
 export type RhWallet = { userId: string; address: string; ownerAddress: string; encryptedSecret: string; chainId: number };
 export type RhPermission = { id: string; userId: string; kind: 'TRADE' | 'WITHDRAW'; channelId: string; fingerprint: string; recipient: string; instanceId: string | null; ownerAddress: string; walletAddress: string; tokenScope: 'ANY_ROBINHOOD' | 'SELECTED_TOKENS'; tokens: string[]; perLimitWei: string; dailyLimitWei: string; maxFeeWei: string; slippageBps: number; expiresAt: Date; revokedAt: Date | null; revokeReason: string | null; message: string; signature: string; createdAt: Date };
-export type RhOperation = { id: string; userId: string; commandId: string | null; permissionId: string | null; kind: 'BUY' | 'SELL' | 'WITHDRAW'; tokenAddress: string; amount: string; walletAddress: string; status: string; budgetWei: string; txHash: string | null; approvalHash: string | null; nonce: number | null; data: any; error: string | null; confirmationHash: string | null; confirmationExpiresAt: Date | null; createdAt: Date; updatedAt: Date };
+export type RhOperation = { id: string; userId: string; commandId: string | null; permissionId: string | null; channelId:string|null;channelSlot:number|null;channelLabel:string|null;kind: 'BUY' | 'SELL' | 'WITHDRAW'; tokenAddress: string; amount: string; walletAddress: string; status: string; budgetWei: string; txHash: string | null; approvalHash: string | null; nonce: number | null; data: any; error: string | null; confirmationHash: string | null; confirmationExpiresAt: Date | null; createdAt: Date; updatedAt: Date };
 export type ChatContext = { id: string; ownerId: string; leaseToken: string };
 export const pendingStates = ['QUEUED','PREPARING','SIGNED','EXECUTING','APPROVAL_SUBMITTED','UNKNOWN'];
 export async function walletFor(userId: string, tx: Tx = db) { return (await tx.sql<RhWallet>`SELECT * FROM "RHWallet" WHERE "userId"=${userId}`)[0] || null; }
@@ -27,20 +27,20 @@ export async function freshSession(tx: Tx, req: Request, allowStopped=false) {
   const userId=req.user!.id;await lockUser(tx,userId);const session=await tx.session.findUnique({where:{id:hash(req.cookies?.ab_session||'')}}),user=await tx.user.findUnique({where:{id:userId}});
   check(session?.userId===userId&&session.expiresAt>new Date()&&user&&!user.disabled,401,'Sign in again before changing wallet access.');check(allowStopped||!user.emergencyStop,409,'Clear emergency stop before enabling access.');return userId;
 }
-export async function paired(tx:Tx,userId:string, context?:ChatContext) {
-  const channel=await tx.personalAgentChannel.findUnique({where:{userId}});
+export async function paired(tx:Tx,userId:string, context?:ChatContext,channelId?:string) {
+  const channel=await tx.personalAgentChannel.findFirst({where:{userId,...(context||channelId?{id:context?.id||channelId}:{slot:1})}});
   check(channel?.enabled&&channel.ownerId,409,'Pair your personal WhatsApp agent first.');
   check(!channel.appUrl||new URL(channel.appUrl).origin===new URL(env.appUrl).origin,409,'Manage this paired chat on its original production website.');
   if(context)check(channel.id===context.id&&channel.ownerId===context.ownerId&&channel.leaseToken===context.leaseToken&&channel.leaseUntil&&channel.leaseUntil>new Date(),403,'WhatsApp connection changed or its worker lease expired.');
   return channel;
 }
 export async function selectedAgent(tx:Tx,userId:string) { const workspace=await tx.tradingWorkspace.findUnique({where:{userId}});const instance=workspace?.activeInstanceId?await tx.instance.findFirst({where:{id:workspace.activeInstanceId,userId},include:{version:{include:{agent:true}}}}):null;check(instance?.version.agent.creatorId===userId,409,'Select a private agent you created in Connections.');return instance; }
-export async function revokeRh(tx:Tx,userId:string,kind:'TRADE'|'WITHDRAW'|'ALL',reason:string) {
-  await tx.sql`UPDATE "RHPermission" SET "revokedAt"=timezone('UTC',CURRENT_TIMESTAMP),"revokeReason"=${reason} WHERE "userId"=${userId} AND "revokedAt" IS NULL AND (${kind}='ALL' OR kind=${kind})`;
-  await tx.sql`DELETE FROM "RHChallenge" WHERE "userId"=${userId} AND (purpose=${kind} OR ${kind}='ALL')`;
-  await tx.sql`UPDATE "RHOperation" SET status='CANCELLED',error=${reason},"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE "userId"=${userId} AND status IN ('QUEUED','PREPARING','PREVIEW') AND ((${kind}='TRADE' AND kind IN ('BUY','SELL')) OR (${kind}='WITHDRAW' AND kind='WITHDRAW') OR ${kind}='ALL')`;
+export async function revokeRh(tx:Tx,userId:string,kind:'TRADE'|'WITHDRAW'|'ALL',reason:string,channelId='') {
+  await tx.sql`UPDATE "RHPermission" SET "revokedAt"=timezone('UTC',CURRENT_TIMESTAMP),"revokeReason"=${reason} WHERE "userId"=${userId} AND "revokedAt" IS NULL AND (${channelId}='' OR "channelId"=${channelId}) AND (${kind}='ALL' OR kind=${kind})`;
+  await tx.sql`DELETE FROM "RHChallenge" WHERE "userId"=${userId} AND (${channelId}='' OR payload->>'channelId'=${channelId}) AND (purpose=${kind} OR ${kind}='ALL')`;
+  await tx.sql`UPDATE "RHOperation" SET status='CANCELLED',error=${reason},"updatedAt"=timezone('UTC',CURRENT_TIMESTAMP) WHERE "userId"=${userId} AND (${channelId}='' OR "channelId"=${channelId}) AND status IN ('QUEUED','PREPARING','PREVIEW') AND ((${kind}='TRADE' AND kind IN ('BUY','SELL')) OR (${kind}='WITHDRAW' AND kind='WITHDRAW') OR ${kind}='ALL')`;
 }
-export async function latestPermission(userId:string,kind:'TRADE'|'WITHDRAW',tx:Tx=db) { return (await tx.sql<RhPermission>`SELECT * FROM "RHPermission" WHERE "userId"=${userId} AND kind=${kind} ORDER BY "createdAt" DESC,id DESC LIMIT 1`)[0]||null; }
+export async function latestPermission(userId:string,kind:'TRADE'|'WITHDRAW',tx:Tx=db,channelId?:string) { const id=channelId||(await tx.personalAgentChannel.findFirst({where:{userId,slot:1}}))?.id||'missing';return (await tx.sql<RhPermission>`SELECT * FROM "RHPermission" WHERE "userId"=${userId} AND "channelId"=${id} AND kind=${kind} ORDER BY "createdAt" DESC,id DESC LIMIT 1`)[0]||null; }
 export async function validatePermission(tx:Tx,userId:string,id:string,kind:'TRADE'|'WITHDRAW',context?:ChatContext) {
   const user=await tx.user.findUnique({where:{id:userId}});check(user&&!user.disabled&&!user.emergencyStop,409,'Trading is stopped.');
   const wallet=await walletFor(userId,tx),permission=(await tx.sql<RhPermission>`SELECT * FROM "RHPermission" WHERE id=${id} AND "userId"=${userId} AND kind=${kind}`)[0];
@@ -52,17 +52,25 @@ export async function validatePermission(tx:Tx,userId:string,id:string,kind:'TRA
     consentValid=evmAddress(verifyMessage(permission.message,permission.signature))===wallet.ownerAddress&&line('Website')===new URL(env.appUrl).origin&&line('Chain ID')==='4663'&&line('Owner')===wallet.ownerAddress&&line('Trading wallet')===wallet.address&&line('Connection')===permission.channelId&&line('Paired chat')===permission.recipient&&line('Agent')===(permission.instanceId||'Not applicable')&&line('Nonce')===permission.id&&line('Scope')===scope&&line('Permission expires')===permission.expiresAt.toISOString()&&weiAmount(line('Per-operation total budget').replace(/ ETH$/,''))===BigInt(permission.perLimitWei)&&weiAmount(line('UTC daily total budget').replace(/ ETH$/,''))===BigInt(permission.dailyLimitWei)&&weiAmount(line('Maximum gas per operation').replace(/ ETH$/,''))===BigInt(permission.maxFeeWei)&&line('Slippage limit')===`${permission.slippageBps/100}%`&&(permission.tokenScope==='ANY_ROBINHOOD'?permission.tokens.length===0:permission.tokens.length>0&&permission.tokens.length<=10);
   }catch{/* A modified persisted grant must never expand signed authority. */}
   check(consentValid,403,'Stored permission fields do not match the original signed consent. Review and sign a new permission.');
-  const channel=await paired(tx,userId,context);
+  const channel=await paired(tx,userId,context,permission.channelId);
+  const signedSlot=permission.message.split('\n').find(line=>line.startsWith('Connection slot: '))?.slice('Connection slot: '.length);
+  check(signedSlot?String(channel.slot)===signedSlot:channel.slot===1,403,'Connection slot differs from the owner-signed approval. Review and sign a new permission.');
   check(permission.channelId===channel.id&&permission.fingerprint===channel.tokenFingerprint&&permission.recipient===channel.ownerId&&channel.createdAt<=permission.createdAt,409,'The approved WhatsApp connection changed. Sign a new permission.');
   check(permission.ownerAddress===wallet.ownerAddress&&permission.walletAddress===wallet.address&&permission.message.includes(`\nChain ID: ${ROBINHOOD_CHAIN_ID}\n`),409,'Wallet or network authorization mismatch.');
   if(kind==='TRADE')check(permission.instanceId===(await selectedAgent(tx,userId)).id,409,'The selected agent changed. Sign a new permission.');
   return {wallet,permission};
 }
 export async function assertIdle(tx:Tx,userId:string,exclude='') {const row=await tx.sql`SELECT id FROM "RHOperation" WHERE "userId"=${userId} AND id<>${exclude} AND status=ANY(${pendingStates}::text[]) LIMIT 1`;check(!row.length,409,'An earlier operation needs confirmation. Use Check trade or Check withdrawal before another financial command.');}
-export async function dailyUsage(tx:Tx,userId:string,kind:'TRADE'|'WITHDRAW',exclude='') {
+export async function dailyUsage(tx:Tx,userId:string,kind:'TRADE'|'WITHDRAW',exclude='',slot=0) {
   const day=new Date();day.setUTCHours(0,0,0,0);
-  const rows=await tx.sql<{amount:string}>`SELECT COALESCE(SUM("budgetWei"),0)::text AS amount FROM "RHOperation" WHERE "userId"=${userId} AND "walletAddress"=(SELECT address FROM "RHWallet" WHERE "userId"=${userId}) AND id<>${exclude} AND "createdAt">=${day} AND (${kind}='WITHDRAW' AND kind='WITHDRAW' OR ${kind}='TRADE' AND kind IN ('BUY','SELL')) AND (status NOT IN ('PREVIEW','QUEUED','PREPARING','CANCELLED','REJECTED') OR "txHash" IS NOT NULL OR "approvalHash" IS NOT NULL)`;return BigInt(rows[0].amount);
+  const rows=await tx.sql<{amount:string}>`SELECT COALESCE(SUM("budgetWei"),0)::text AS amount FROM "RHOperation" WHERE "userId"=${userId} AND "walletAddress"=(SELECT address FROM "RHWallet" WHERE "userId"=${userId}) AND id<>${exclude} AND (${slot}=0 OR "channelSlot"=${slot}) AND "createdAt">=${day} AND (${kind}='WITHDRAW' AND kind='WITHDRAW' OR ${kind}='TRADE' AND kind IN ('BUY','SELL')) AND (status NOT IN ('PREVIEW','QUEUED','PREPARING','CANCELLED','REJECTED') OR "txHash" IS NOT NULL OR "approvalHash" IS NOT NULL)`;return BigInt(rows[0].amount);
 }
+export type WalletBudget={userId:string;kind:'TRADE'|'WITHDRAW';walletAddress:string;ownerAddress:string;perLimitWei:string;dailyLimitWei:string;message:string;signature:string};
+export async function walletBudgetFor(userId:string,kind:'TRADE'|'WITHDRAW',tx:Tx=db){return (await tx.sql<WalletBudget>`SELECT * FROM "RHWalletBudget" WHERE "userId"=${userId} AND kind=${kind}`)[0]||null;}
+export function validateWalletBudget(b:WalletBudget,wallet:RhWallet){
+  let valid=false;try{const line=(label:string)=>b.message.split('\n').find(s=>s.startsWith(label+': '))?.slice(label.length+2)||'';valid=b.message.split('\n')[0]===`${new URL(env.appUrl).host} · Wagent Ai ${b.kind}`&&evmAddress(verifyMessage(b.message,b.signature))===wallet.ownerAddress&&line('Owner')===wallet.ownerAddress&&line('Website')===new URL(env.appUrl).origin&&line('Chain ID')==='4663'&&line('Trading wallet')===wallet.address&&b.ownerAddress===wallet.ownerAddress&&b.walletAddress===wallet.address&&weiAmount(line('Combined per-operation total budget').replace(/ ETH$/,''))===BigInt(b.perLimitWei)&&weiAmount(line('Combined UTC daily total budget').replace(/ ETH$/,''))===BigInt(b.dailyLimitWei);}catch{/* Never trust edited unsigned ceilings. */}check(valid,403,'Shared wallet limits do not match owner-signed consent. Review and sign new limits.');
+}
+export function walletBudgetView(b:WalletBudget|null){return b?{perLimitEth:fromWei(b.perLimitWei),dailyEth:fromWei(b.dailyLimitWei)}:null;}
 export async function createChallenge(tx:Tx,req:Request,purpose:string,address:string,payload:any,detail:string,ttl=180000) {
   const userId=await freshSession(tx,req,purpose==='RECOVER'),id=randomUUID(),expiresAt=new Date(Date.now()+ttl);
   const message=`${new URL(env.appUrl).host} · Wagent Ai ${purpose}\nWebsite: ${new URL(env.appUrl).origin}\nChain ID: ${ROBINHOOD_CHAIN_ID}\nNetwork: Robinhood Chain\nOwner: ${address}\n${detail}\nExpires: ${expiresAt.toISOString()}\nNonce: ${id}`;

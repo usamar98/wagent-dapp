@@ -14,7 +14,7 @@ export async function revokeWithdrawals(tx:Tx,userId:string,reason:string){
   await tx.agentCommand.updateMany({where:{userId,status:'WITHDRAWAL_QUEUED'},data:{status:'REJECTED',reply:`NOT EXECUTED · ${reason}`}});
 }
 export async function withdrawalContext(tx:Tx,userId:string,origin=env.appUrl){
-  const [user,owner,wallet,channel]=await Promise.all([tx.user.findUnique({where:{id:userId}}),tx.solanaWallet.findUnique({where:{userId}}),tx.solanaTradingWallet.findUnique({where:{userId}}),tx.personalAgentChannel.findUnique({where:{userId}})]);
+  const [user,owner,wallet,channel]=await Promise.all([tx.user.findUnique({where:{id:userId}}),tx.solanaWallet.findUnique({where:{userId}}),tx.solanaTradingWallet.findUnique({where:{userId}}),tx.personalAgentChannel.findUnique({where:{slot:1,userId}})]);
   check(user&&!user.disabled&&!user.emergencyStop,409,'Withdrawals are stopped or this account is unavailable.');
   check(wallet&&owner?.address===wallet.ownerAddress,409,'Verify the original Solana owner wallet before enabling WhatsApp withdrawals.');
   check(channel?.enabled&&channel.ownerId,409,'Pair your own WhatsApp agent before enabling withdrawals.');

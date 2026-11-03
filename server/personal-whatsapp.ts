@@ -9,6 +9,7 @@ import { env } from './env.js';
 import { websiteOrigin } from './website-runtime.js';
 import { revokeTrading } from './solana-permissions.js';
 import {robinhoodRelease} from './robinhood/providers.js';
+import {revokeRh} from './robinhood/access.js';
 
 const base = 'https://api.whatsapp.com/agent/v1';
 const senderId = z.string().regex(/^user:[A-Za-z0-9._-]{1,160}$/);
@@ -79,8 +80,8 @@ async function deliverPending(channel: { id: string; ownerId: string | null; enc
   }
 }
 
-export async function syncPersonalAgent(userId: string) {
-  const channel = await db.personalAgentChannel.findUnique({ where: { userId } });
+export async function syncPersonalAgent(userId: string,channelId?:string) {
+  const channel = await db.personalAgentChannel.findFirst({ where: {userId,...(channelId?{id:channelId}:{slot:1})} });
   check(channel?.enabled, 409, 'Connect and enable your personal WhatsApp agent first.');
   const lease = token(), now = new Date();
   const claimed = await db.personalAgentChannel.updateMany({ where: { id: channel.id, enabled: true, nextPollAt: { lte: now }, OR: [{ leaseUntil: null }, { leaseUntil: { lte: now } }] }, data: { leaseToken: lease, leaseUntil: new Date(Date.now() + 180000), nextPollAt: new Date(Date.now() + 6000) } });
@@ -102,6 +103,8 @@ export async function syncPersonalAgent(userId: string) {
     let processed = 0;
     for (const entry of payload.entry) {
       check(!channel.agentId || channel.agentId === entry.id, 409, 'The connected WhatsApp agent changed. Reconnect its key.');
+      const duplicate=await db.personalAgentChannel.findFirst({where:{userId,agentId:entry.id,id:{not:channel.id}}});
+      check(!duplicate,409,'This WhatsApp agent is already connected in the other slot. Use a different personal agent.');
       for (const change of entry.changes) for (const message of change.value.messages) {
         const sentAt = Number(message.timestamp) * 1000;
         if (!Number.isFinite(sentAt) || sentAt < channel.createdAt.getTime() - 5000 || sentAt > Date.now() + 30000) continue;
@@ -139,38 +142,44 @@ export async function syncPersonalAgent(userId: string) {
 
 export const personalWhatsAppRouter = Router();
 personalWhatsAppRouter.use(auth);
+const channelSlot=z.number().int().min(1).max(2).default(1);
+const slotBody=z.object({slot:channelSlot}).strict();
 personalWhatsAppRouter.post('/', async (req, res) => {
-  const input = z.object({ label: z.string().trim().min(2).max(60), apiKey: z.string().trim().min(20).max(4096).regex(/^\S+$/), consent: z.literal(true) }).strict().parse(req.body);
+  const input = z.object({slot:channelSlot,label: z.string().trim().min(2).max(60), apiKey: z.string().trim().min(20).max(4096).regex(/^\S+$/), consent: z.literal(true) }).strict().parse(req.body);
+  check(input.slot===1||robinhoodRelease(),409,'Two connections are available for Robinhood Chain wallets.');
   const code = randomBytes(6).toString('hex').toUpperCase();
   await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
     const data = { appUrl:websiteOrigin(env.appUrl),label: input.label, encryptedToken: encrypt(input.apiKey), tokenFingerprint: hash(input.apiKey), ownerId: null, agentId: null, pairingHash: hash(code), pairingExpiresAt: new Date(Date.now() + 10 * 60000), enabled: true, offset: '0', leaseToken: null, leaseUntil: null, nextPollAt: new Date(), lastError: null, lastPollAt: null, lastMessageAt: null, createdAt: new Date(), consentAt: new Date() };
-    await revokeTrading(tx,userId,'Replacing the WhatsApp connection revoked chat trading permission.');await revokeWithdrawals(tx,userId,'Replacing the WhatsApp connection revoked chat trading permission.');
-    const previous = await tx.personalAgentChannel.findUnique({ where: { userId } });
+    const duplicate=await tx.personalAgentChannel.findFirst({where:{tokenFingerprint:hash(input.apiKey)}});check(!duplicate||(duplicate.userId===userId&&duplicate.slot===input.slot),409,'This personal agent key is already connected. Use a different agent key for the second connection.');
+    const previous = await tx.personalAgentChannel.findUnique({ where: {slot:input.slot, userId } });
+    if(robinhoodRelease()){if(previous)await revokeRh(tx,userId,'ALL','WhatsApp connection key replaced.',previous.id);}else{await revokeTrading(tx,userId,'Replacing WhatsApp revoked trading.');await revokeWithdrawals(tx,userId,'Replacing WhatsApp revoked withdrawals.');}
     if (previous) await tx.agentCommand.updateMany({ where: { channelId: previous.id, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'CANCELLED' } });
-    await tx.personalAgentChannel.upsert({ where: { userId }, create: { userId, ...data }, update: data });
+    await tx.personalAgentChannel.upsert({ where: {slot:input.slot, userId }, create: {slot:input.slot,userId, ...data }, update: data });
   });
   res.status(201).json({ pairingCommand: `LINK ${code}`, expiresInSeconds: 600 });
 });
-personalWhatsAppRouter.post('/sync', async (req, res) => res.json(await syncPersonalAgent(req.user!.id)));
+personalWhatsAppRouter.post('/sync', async (req, res) => {const {slot}=slotBody.parse(req.body);const channel=await db.personalAgentChannel.findUnique({where:{userId:req.user!.id,slot}});check(channel,409,'Save this connection first.');res.json(await syncPersonalAgent(req.user!.id,channel.id));});
 personalWhatsAppRouter.post('/pairing', async (req, res) => {
+  const {slot}=slotBody.parse(req.body);
   const code = randomBytes(6).toString('hex').toUpperCase();
   await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
-    const channel = await tx.personalAgentChannel.findUnique({ where: { userId } });
+    const channel = await tx.personalAgentChannel.findUnique({ where: {slot, userId } });
     check(channel && !channel.ownerId, 409, 'Reconnect your key to change an already paired agent.');
-    await tx.personalAgentChannel.update({ where: { userId }, data: { pairingHash: hash(code), pairingExpiresAt: new Date(Date.now() + 600000) } });
+    await tx.personalAgentChannel.update({ where: {slot, userId }, data: { pairingHash: hash(code), pairingExpiresAt: new Date(Date.now() + 600000) } });
   });
   res.json({ pairingCommand: `LINK ${code}`, expiresInSeconds: 600 });
 });
 personalWhatsAppRouter.post('/disconnect', async (req, res) => {
+  const {slot}=slotBody.parse(req.body);
   await transaction(async tx => {
     const userId = req.user!.id; await lockUser(tx, userId);
-    await revokeTrading(tx,userId,'Disconnecting WhatsApp revoked chat trading permission.');await revokeWithdrawals(tx,userId,'Disconnecting WhatsApp revoked chat trading permission.');
-    const channel = await tx.personalAgentChannel.findUnique({ where: { userId } });
+    const channel = await tx.personalAgentChannel.findUnique({ where: {slot, userId } });
+    if(robinhoodRelease()){if(channel)await revokeRh(tx,userId,'ALL','WhatsApp connection disconnected.',channel.id);}else{await revokeTrading(tx,userId,'Disconnecting WhatsApp revoked trading.');await revokeWithdrawals(tx,userId,'Disconnecting WhatsApp revoked withdrawals.');}
     if (channel) {
       await tx.agentCommand.updateMany({ where: { channelId: channel.id, deliveryStatus: { in: ['PENDING', 'RETRY'] } }, data: { deliveryStatus: 'CANCELLED' } });
-      await tx.personalAgentChannel.delete({ where: { userId } });
+      await tx.personalAgentChannel.delete({ where: {id:channel.id} });
     }
     await tx.tradeIntent.updateMany({ where: { userId, status: 'PENDING' }, data: { status: 'CANCELLED' } });
   });
@@ -179,9 +188,9 @@ personalWhatsAppRouter.post('/disconnect', async (req, res) => {
 
 export async function tickPersonalAgents(options: { limit?: number; deadline?: number } = {}) {
   const now = new Date();
-  const channels = await db.personalAgentChannel.findMany({ where: { enabled: true, nextPollAt: { lte: now }, OR: [{ leaseUntil: null }, { leaseUntil: { lte: now } }] }, select: { userId: true }, orderBy: { nextPollAt: 'asc' }, take: options.limit ?? 50 });
+  const channels = await db.personalAgentChannel.findMany({ where: { enabled: true, nextPollAt: { lte: now }, OR: [{ leaseUntil: null }, { leaseUntil: { lte: now } }] }, select: {id:true,userId: true }, orderBy: { nextPollAt: 'asc' }, take: options.limit ?? 50 });
   for (let start = 0; start < channels.length; start += 4) {
     if (Date.now() >= (options.deadline ?? Infinity)) break;
-    await Promise.allSettled(channels.slice(start, start + 4).map(channel => syncPersonalAgent(channel.userId)));
+    await Promise.allSettled(channels.slice(start, start + 4).map(channel => syncPersonalAgent(channel.userId,channel.id)));
   }
 }

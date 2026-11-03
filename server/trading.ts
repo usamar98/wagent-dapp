@@ -28,7 +28,7 @@ export async function getWorkspace(userId: string) {
   return transaction(async tx => {
   await lockUser(tx,userId);
   await tx.tradeIntent.updateMany({ where: { userId, status: 'PENDING', expiresAt: { lte: new Date() } }, data: { status: 'EXPIRED' } });
-  const channel = await tx.personalAgentChannel.findUnique({ where: { userId } });
+  const channels = await tx.personalAgentChannel.findMany({where:{userId},orderBy:{slot:'asc'}}),channel=channels.find(c=>c.slot===1);
   const [workspace, versions, instances, commands, intents, worker] = await Promise.all([
     tx.tradingWorkspace.upsert({ where: { userId }, create: { userId }, update: {} }),
     tx.agentVersion.findMany({ where: { OR: [{ agent: { creatorId: userId } }, { entitlements: { some: { buyerId: userId, status: 'ACTIVE', ...(env.demo ? {} : { environment: { not: 'DEMO' } }) } } }] }, include: { agent: { select: { id: true, name: true, creatorId: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
@@ -40,6 +40,7 @@ export async function getWorkspace(userId: string) {
   return {
     workspace, versions: versions.filter(v => configSchema.safeParse(v.config).success), instances, commands: commands.reverse(), intents,
     channel: channel ? { label:channel.label, paired:!!channel.ownerId, enabled:channel.enabled, pairingExpiresAt:channel.pairingExpiresAt, lastPollAt:channel.lastPollAt, lastMessageAt:channel.lastMessageAt, lastError:channel.lastError } : null,
+    channels:channels.map(c=>({id:c.id,slot:c.slot,label:c.label,paired:!!c.ownerId,enabled:c.enabled,pairingExpiresAt:c.pairingExpiresAt,lastPollAt:c.lastPollAt,lastMessageAt:c.lastMessageAt,lastError:c.lastError})),
     network: robinhoodRelease()?'robinhood':'solana', dataProvider: 'DEX Screener', workerOnline: !!worker && Date.now() - Number(worker.value) < 30000,
     liveTrading: robinhoodRelease()?rhReadiness().swaps:providerStatus().swapsEnabled,
   };

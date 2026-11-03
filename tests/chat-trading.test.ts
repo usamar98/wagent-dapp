@@ -268,14 +268,14 @@ describe('chat trading agent setup',()=>{
   it('saves a new token version and selects it atomically without replacing WhatsApp, the owner, or the original version',async()=>{
     await withAgent([SOL],async agent=>{
       await db.tradingWorkspace.update({where:{userId},data:{activeInstanceId:null}});
-      const before=await db.personalAgentChannel.findUnique({where:{userId}}),p=provider();
+      const before=await db.personalAgentChannel.findUnique({where:{slot:1,userId}}),p=provider();
       const saved=await post('/agent',{versionId:agent.versions[0].id,mints:[MINT]});expect(saved.status,JSON.stringify(saved.body)).toBe(200);
       expect(saved.body.versionId).not.toBe(agent.versions[0].id);
       expect((await db.agentVersion.findUnique({where:{id:agent.versions[0].id}})).config.symbols).toEqual([SOL]);
       expect((await db.agentVersion.findUnique({where:{id:saved.body.versionId}})).number).toBe(2);
       const snapshot=(await client.get('/api/solana/chat-trading')).body;
       expect(snapshot.agentSetup.selectedVersionId).toBe(saved.body.versionId);expect(snapshot.availableMints).toEqual([MINT]);expect(snapshot.paired).toBe(true);expect(snapshot.permission).toBeNull();
-      const after=await db.personalAgentChannel.findUnique({where:{userId}});expect(after.id).toBe(before.id);expect(after.tokenFingerprint).toBe(before.tokenFingerprint);expect(after.ownerId).toBe(before.ownerId);
+      const after=await db.personalAgentChannel.findUnique({where:{slot:1,userId}});expect(after.id).toBe(before.id);expect(after.tokenFingerprint).toBe(before.tokenFingerprint);expect(after.ownerId).toBe(before.ownerId);
       expect((await db.solanaWallet.findUnique({where:{userId}})).address).toBe(ownerAddress);expect(p.mock).not.toHaveBeenCalled();
     });
   });

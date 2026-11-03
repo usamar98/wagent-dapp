@@ -1,10 +1,11 @@
 // Application records stored in Supabase PostgreSQL. Keep in sync with SQL migrations.
 import type { PermissionTokenScope } from '../../shared/permission-scope.js';
-import type {RhWallet,RhPermission,RhOperation} from '../robinhood/access.js';
+import type {RhWallet,RhPermission,RhOperation,WalletBudget} from '../robinhood/access.js';
 import type {RhAlert} from '../robinhood/data.js';
 export interface ModelRows {
   RHWallet:RhWallet & {createdAt:Date};
   RHPermission:RhPermission;
+  RHWalletBudget:WalletBudget & {updatedAt:Date};
   RHOperation:RhOperation;
   RHAlert:RhAlert;
   RHChallenge:{id:string;userId:string;sessionId:string;purpose:string;address:string;message:string;payload:any;expiresAt:Date;createdAt:Date};
@@ -252,6 +253,7 @@ export interface ModelRows {
     updatedAt: Date;
   };
   PersonalAgentChannel: {
+    slot: number;
     appUrl: string | null;
     id: string;
     userId: string;
@@ -324,8 +326,9 @@ export type ModelName = keyof ModelRows;
 
 export const databaseSchema = {
   RHWallet:{columns:['userId','address','ownerAddress','encryptedSecret','chainId','createdAt'],primaryKey:['userId'],unique:[['userId'],['address']],generatedId:false,updatedAt:[],json:[],relations:{}},
+  RHWalletBudget:{columns:['userId','kind','walletAddress','ownerAddress','perLimitWei','dailyLimitWei','message','signature','updatedAt'],primaryKey:['userId','kind'],unique:[['userId','kind']],generatedId:false,updatedAt:[],json:[],relations:{}},
   RHPermission:{columns:['id','userId','kind','channelId','fingerprint','recipient','instanceId','ownerAddress','walletAddress','tokenScope','tokens','perLimitWei','dailyLimitWei','maxFeeWei','slippageBps','expiresAt','revokedAt','revokeReason','message','signature','createdAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:[],json:[],relations:{}},
-  RHOperation:{columns:['id','userId','commandId','permissionId','kind','tokenAddress','amount','walletAddress','status','budgetWei','txHash','approvalHash','nonce','data','error','confirmationHash','confirmationExpiresAt','createdAt','updatedAt'],primaryKey:['id'],unique:[['id'],['commandId'],['txHash'],['approvalHash']],generatedId:true,updatedAt:['updatedAt'],json:['data'],relations:{}},
+  RHOperation:{columns:['id','userId','commandId','permissionId','channelId','channelSlot','channelLabel','kind','tokenAddress','amount','walletAddress','status','budgetWei','txHash','approvalHash','nonce','data','error','confirmationHash','confirmationExpiresAt','createdAt','updatedAt'],primaryKey:['id'],unique:[['id'],['commandId'],['txHash'],['approvalHash']],generatedId:true,updatedAt:['updatedAt'],json:['data'],relations:{}},
   RHAlert:{columns:['id','userId','name','kind','tokenAddress','threshold','minLiquidityUsd','delivery','enabled','cooldownMinutes','lastMatched','lastCheckedAt','lastTriggeredAt','baselineAt','lastError','createdAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:[],json:[],relations:{}},
   RHChallenge:{columns:['id','userId','sessionId','purpose','address','message','payload','expiresAt','createdAt'],primaryKey:['id'],unique:[['id']],generatedId:true,updatedAt:[],json:['payload'],relations:{}},
   RHDiscovery:{columns:['address','firstSeenAt','lastSeenAt'],primaryKey:['address'],unique:[['address']],generatedId:false,updatedAt:[],json:[],relations:{}},
@@ -1250,6 +1253,7 @@ export const databaseSchema = {
   },
   "PersonalAgentChannel": {
     "columns": [
+      "slot",
       "appUrl",
       "id",
       "userId",
@@ -1280,7 +1284,7 @@ export const databaseSchema = {
         "id"
       ],
       [
-        "userId"
+        "userId", "slot"
       ],
       [
         "tokenFingerprint"

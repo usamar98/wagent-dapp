@@ -4,7 +4,7 @@ import { db, transaction, lockUser, type Tx } from '../db.js';
 import { check, AppError, hash } from '../security.js';
 import { env } from '../env.js';
 import { assetBalance, ETH_TOKEN, erc20, evmAddress, fromWei, hex, holder, verifySettler, prepareTransaction, quoteSwap, ROBINHOOD_CHAIN_ID, rpc, signEvmTransaction, tokenInfo, transactionHash, validateSwapData, weiAmount, type RhQuote, type RhTransaction } from './providers.js';
-import { assertIdle, dailyUsage, openKey, pendingStates, validatePermission, walletFor, type ChatContext, type RhOperation, type RhWallet } from './access.js';
+import { assertIdle, dailyUsage, openKey, pendingStates, validatePermission, walletFor, walletBudgetFor,validateWalletBudget,type ChatContext, type RhOperation, type RhWallet } from './access.js';
 import { receiptDetails, type ReceiptDetails } from './receipt.js';
 export async function operationFor(userId:string,id:string,tx:Tx=db) {return (await tx.sql<RhOperation>`SELECT * FROM "RHOperation" WHERE id=${id} AND "userId"=${userId}`)[0]||null;}
 export async function operationList(userId:string,tx:Tx=db) {return tx.sql<RhOperation>`SELECT * FROM "RHOperation" WHERE "userId"=${userId} ORDER BY "createdAt" DESC,id DESC LIMIT 30`;}
@@ -20,7 +20,8 @@ export function operationPresentation(op:RhOperation) {
 }
 export async function queueOperation(tx:Tx,userId:string,kind:RhOperation['kind'],tokenAddress:string,amount:string,wallet:RhWallet,permissionId:string|null,commandId:string|null,data:any={},status='QUEUED') {
   await assertIdle(tx,userId);const id=randomUUID();
-  const op=(await tx.sql<RhOperation>`INSERT INTO "RHOperation" (id,"userId","commandId","permissionId",kind,"tokenAddress",amount,"walletAddress",status,data) VALUES (${id},${userId},${commandId},${permissionId},${kind},${evmAddress(tokenAddress)},${amount},${wallet.address},${status},${JSON.stringify(data)}::jsonb) RETURNING *`)[0];return op;
+  const channel=permissionId?(await tx.sql<{id:string;slot:number;label:string}>`SELECT c.id,c.slot,c.label FROM "PersonalAgentChannel" c JOIN "RHPermission" p ON p."channelId"=c.id AND p."userId"=c."userId" WHERE p.id=${permissionId} AND c."userId"=${userId}`)[0]:null;
+  const op=(await tx.sql<RhOperation>`INSERT INTO "RHOperation" (id,"userId","commandId","permissionId","channelId","channelSlot","channelLabel",kind,"tokenAddress",amount,"walletAddress",status,data) VALUES (${id},${userId},${commandId},${permissionId},${channel?.id||null},${channel?.slot||null},${channel?.label||null},${kind},${evmAddress(tokenAddress)},${amount},${wallet.address},${status},${JSON.stringify(data)}::jsonb) RETURNING *`)[0];return op;
 }
 async function guard(tx:Tx,op:RhOperation,context?:ChatContext) {
   const user=await tx.user.findUnique({where:{id:op.userId}}),wallet=await walletFor(op.userId,tx);check(user&&!user.disabled&&wallet?.address===op.walletAddress,403,'Trading wallet ownership changed.');
@@ -34,7 +35,15 @@ function canonical(value:any):any {return Array.isArray(value)?value.map(canonic
 export function reviewHash(data:any) {return keccak256(Buffer.from(JSON.stringify(canonical({quote:data.quote||null,transfer:data.transfer||null,maxFeeWei:data.maxFeeWei,reviewExpiry:data.reviewExpiry}))));}
 async function budgets(tx:Tx,op:RhOperation,context?:ChatContext) {
   const access=await guard(tx,op,context),fee=BigInt(access.permission?.maxFeeWei||op.data.maxFeeWei),budget=op.kind==='WITHDRAW'?(op.tokenAddress===ETH_TOKEN?BigInt(op.data.rawAmount):0n)+fee:BigInt(op.kind==='BUY'?op.data.quote.sellAmount:op.data.quote.buyAmount)+fee;
-  if(access.permission){const p=access.permission;check(budget<=BigInt(p.perLimitWei),409,'Amount plus the reserved gas fee exceeds your per-operation budget.');check(await dailyUsage(tx,op.userId,p.kind,op.id)+budget<=BigInt(p.dailyLimitWei),409,'The UTC daily spending budget would be exceeded.');if(op.kind!=='WITHDRAW')check(p.tokenScope==='ANY_ROBINHOOD'||p.tokens.includes(op.tokenAddress),403,'This token is outside the signed token scope.');}
+  if(access.permission){
+    const p=access.permission,channel=await tx.personalAgentChannel.findFirst({where:{id:p.channelId,userId:op.userId}});check(channel,409,'Connection unavailable.');
+    check(budget<=BigInt(p.perLimitWei),409,'Amount plus the reserved gas fee exceeds your per-operation budget.');
+    check(await dailyUsage(tx,op.userId,p.kind,op.id,channel.slot)+budget<=BigInt(p.dailyLimitWei),409,'This agent’s UTC daily spending budget would be exceeded.');
+    const combined=await walletBudgetFor(op.userId,p.kind,tx);
+    if(combined){validateWalletBudget(combined,access.wallet);check(budget<=BigInt(combined.perLimitWei),409,'The combined wallet per-operation budget would be exceeded.');check(await dailyUsage(tx,op.userId,p.kind,op.id)+budget<=BigInt(combined.dailyLimitWei),409,'The combined wallet UTC daily spending budget would be exceeded.');}
+    else {check(channel.slot===1,409,'Approve combined wallet limits before enabling a second agent.');check(await dailyUsage(tx,op.userId,p.kind,op.id)+budget<=BigInt(p.dailyLimitWei),409,'The UTC daily spending budget would be exceeded.');}
+    if(op.kind!=='WITHDRAW')check(p.tokenScope==='ANY_ROBINHOOD'||p.tokens.includes(op.tokenAddress),403,'This token is outside the signed token scope.');
+  }
   return {...access,fee,budget};
 }
 export async function prepareOperation(userId:string,id:string,context?:ChatContext) {
@@ -117,6 +126,7 @@ export function operationReply(op:RhOperation) {
   const title=op.status==='CONFIRMED'?'CONFIRMED':op.status==='PREVIEW'?presentation.statusLabel.toUpperCase():op.status==='APPROVAL_ONLY'?'APPROVAL ONLY · SWAP NOT SUBMITTED':['REJECTED','CANCELLED','FAILED'].includes(op.status)?'NOT EXECUTED':!op.txHash&&!op.approvalHash?'PREPARING · NOT SUBMITTED':'CONFIRMATION PENDING';
   const q=op.data.quote as RhQuote|undefined;
   const lines=[`ROBINHOOD ${title} · ${op.kind==='BUY'?`Buy with ${op.amount} ETH`:op.kind==='SELL'?`Sell ${op.amount} ${q?.symbol||'tokens'}`:`Withdraw ${op.amount} ${op.data.assetSymbol||(op.tokenAddress===ETH_TOKEN?'ETH':'tokens')}`}`,'Network: Robinhood Chain · 4663'];
+  if(op.channelId)lines.push(`WhatsApp agent ${op.channelSlot||1}: ${op.channelLabel||op.channelId}`);
   if(q)lines.push(`Token: ${q.name&&q.name!==q.symbol?q.name+' ('+q.symbol+')':q.symbol}`);
   lines.push(op.kind!=='WITHDRAW'?`Token address: ${op.tokenAddress}`:`Recipient: ${op.data.recipient}`,`Trading wallet: ${op.walletAddress}`,`Requested at (UTC): ${op.createdAt.toISOString()}`);
   if(q){

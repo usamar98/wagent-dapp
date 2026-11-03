@@ -68,7 +68,7 @@ describe('provider-backed private alerts', () => {
  describe('WhatsApp website environment isolation', () => {
   it('uses the production website and its readiness when the worker has no Jupiter key', async () => {
     const runtime = await import('../server/website-runtime.js'), { executeCommand } = await import('../server/trading.js'); const original = process.env.JUPITER_API_KEY;
-    const channel = await db.personalAgentChannel.findUnique({ where: { userId } }); await db.personalAgentChannel.update({ where: { userId }, data: { appUrl: 'https://wagent-ai.vercel.app', leaseToken: 'fixture-lease', leaseUntil: new Date(Date.now() + 90000) } });
+    const channel = await db.personalAgentChannel.findUnique({ where: {slot:1, userId } }); await db.personalAgentChannel.update({ where: {slot:1, userId }, data: { appUrl: 'https://wagent-ai.vercel.app', leaseToken: 'fixture-lease', leaseUntil: new Date(Date.now() + 90000) } });
     try { delete process.env.JUPITER_API_KEY; runtime.clearWebsiteRuntimeCache(); const mock = vi.fn().mockResolvedValue(Response.json({ swapsEnabled: true })); vi.stubGlobal('fetch', mock);
       const result = await executeCommand(userId, 'Status', 'WHATSAPP', randomUUID(), new Date(), { id: channel.id, ownerId: channel.ownerId, leaseToken: 'fixture-lease' }); expect(result.command.reply).toContain('Jupiter ready'); expect(result.command.reply).toContain('https://wagent-ai.vercel.app/alerts'); expect(result.command.reply).not.toContain('localhost'); expect(mock.mock.calls[0][0]).toBe('https://wagent-ai.vercel.app/api/solana/capabilities');
     } finally { process.env.JUPITER_API_KEY = original; }

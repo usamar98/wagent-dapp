@@ -21,7 +21,7 @@ async function emit(tx:Tx,rule:Rule,dedupeKey:string,title:string,body:string,sn
   const user=await tx.user.findUniqueOrThrow({where:{id:rule.userId}});
   if(user.inboxEnabled)await tx.notification.create({data:{userId:rule.userId,channel:'in_app',title,body}});
   if(rule.delivery==='BOTH'){
-    const channel=await tx.personalAgentChannel.findUnique({where:{userId:rule.userId}});
+    const channel=await tx.personalAgentChannel.findUnique({where:{slot:1,userId:rule.userId}});
     if(channel?.enabled&&channel.ownerId)await tx.agentCommand.create({data:{userId:rule.userId,source:'ALERT',externalId:event.id,text:`Alert: ${rule.name}`,reply:body,status:'COMPLETED',channelId:channel.id,recipientId:channel.ownerId,deliveryStatus:'PENDING'}});
   }
   return true;
@@ -94,7 +94,7 @@ export async function tickSolanaAlerts(userId?:string,options:{limit?:number;dea
 export const solanaAlertsRouter=Router();solanaAlertsRouter.use(auth);
 solanaAlertsRouter.get('/alerts',async(req,res)=>{
   const userId=req.user!.id;
-  const [rules,events,worker,channel,deliveries]=await Promise.all([db.solanaAlertRule.findMany({where:{userId},orderBy:{createdAt:'desc'}}),db.solanaAlertEvent.findMany({where:{userId},orderBy:{createdAt:'desc'},take:40}),db.setting.findUnique({where:{key:'workerHeartbeat'}}),db.personalAgentChannel.findUnique({where:{userId}}),db.agentCommand.findMany({where:{userId,source:'ALERT'},select:{externalId:true,deliveryStatus:true},orderBy:{createdAt:'desc'},take:100})]);
+  const [rules,events,worker,channel,deliveries]=await Promise.all([db.solanaAlertRule.findMany({where:{userId},orderBy:{createdAt:'desc'}}),db.solanaAlertEvent.findMany({where:{userId},orderBy:{createdAt:'desc'},take:40}),db.setting.findUnique({where:{key:'workerHeartbeat'}}),db.personalAgentChannel.findUnique({where:{slot:1,userId}}),db.agentCommand.findMany({where:{userId,source:'ALERT'},select:{externalId:true,deliveryStatus:true},orderBy:{createdAt:'desc'},take:100})]);
   res.json({rules,events:events.map(e=>({...e,deliveryStatus:deliveries.find(d=>d.externalId===e.id)?.deliveryStatus||'IN_APP'})),providers:providerStatus(),workerOnline:!!worker&&Date.now()-Number(worker.value)<30000,whatsappPaired:!!channel?.enabled&&!!channel.ownerId});
 });
 solanaAlertsRouter.post('/alerts',async(req,res)=>{
@@ -102,13 +102,13 @@ solanaAlertsRouter.post('/alerts',async(req,res)=>{
   const rule=await transaction(async tx=>{
     const userId=req.user!.id;await lockUser(tx,userId);check(!(await tx.user.findUniqueOrThrow({where:{id:userId}})).emergencyStop,409,'Clear emergency stop before adding alerts.');
     check(await tx.solanaAlertRule.count({where:{userId}})<20,400,'You can save up to 20 alert rules.');
-    if(input.delivery==='BOTH'){const channel=await tx.personalAgentChannel.findUnique({where:{userId}});check(channel?.enabled&&channel.ownerId,409,'Pair your personal WhatsApp agent before enabling WhatsApp alerts.');}
+    if(input.delivery==='BOTH'){const channel=await tx.personalAgentChannel.findUnique({where:{slot:1,userId}});check(channel?.enabled&&channel.ownerId,409,'Pair your personal WhatsApp agent before enabling WhatsApp alerts.');}
     return tx.solanaAlertRule.create({data:{userId,...input}});
   });res.status(201).json(rule);
 });
 solanaAlertsRouter.post('/alerts/:id/toggle',async(req,res)=>{
   const {enabled}=z.object({enabled:z.boolean()}).strict().parse(req.body);
-  await transaction(async tx=>{await lockUser(tx,req.user!.id);const rule=await tx.solanaAlertRule.findFirst({where:{id:String(req.params.id),userId:req.user!.id}});check(rule,404,'Alert rule not found.');if(enabled){check(providerStatus().alertsEnabled,503,'Alerts are disabled.');check(!(await tx.user.findUniqueOrThrow({where:{id:req.user!.id}})).emergencyStop,409,'Clear emergency stop first.');if(rule.delivery==='BOTH'){const channel=await tx.personalAgentChannel.findUnique({where:{userId:req.user!.id}});check(channel?.enabled&&channel.ownerId,409,'Pair WhatsApp before enabling this rule.');}}else await cancelRuleDelivery(tx,req.user!.id,rule.id);await tx.solanaAlertRule.update({where:{id:rule.id},data:{enabled}});});res.json({ok:true});
+  await transaction(async tx=>{await lockUser(tx,req.user!.id);const rule=await tx.solanaAlertRule.findFirst({where:{id:String(req.params.id),userId:req.user!.id}});check(rule,404,'Alert rule not found.');if(enabled){check(providerStatus().alertsEnabled,503,'Alerts are disabled.');check(!(await tx.user.findUniqueOrThrow({where:{id:req.user!.id}})).emergencyStop,409,'Clear emergency stop first.');if(rule.delivery==='BOTH'){const channel=await tx.personalAgentChannel.findUnique({where:{slot:1,userId:req.user!.id}});check(channel?.enabled&&channel.ownerId,409,'Pair WhatsApp before enabling this rule.');}}else await cancelRuleDelivery(tx,req.user!.id,rule.id);await tx.solanaAlertRule.update({where:{id:rule.id},data:{enabled}});});res.json({ok:true});
 });
 solanaAlertsRouter.post('/alerts/:id/delete',async(req,res)=>{await transaction(async tx=>{await lockUser(tx,req.user!.id);await cancelRuleDelivery(tx,req.user!.id,String(req.params.id));await tx.solanaAlertRule.deleteMany({where:{id:String(req.params.id),userId:req.user!.id}});});res.json({ok:true});});
 solanaAlertsRouter.post('/alerts/check',rateLimit({windowMs:60000,limit:2,keyGenerator:rateLimitKey,standardHeaders:'draft-8',legacyHeaders:false}),async(req,res)=>{await tickSolanaAlerts(req.user!.id);res.json({ok:true});});
